@@ -485,6 +485,7 @@ pub fn run() {
             cloud::cloud_login,
             cloud::cloud_logout,
             cloud::get_account_status,
+            cloud::delete_account,
             cloud::create_paypal_subscription,
             cloud::create_payos_payment,
             cloud::get_pricing,

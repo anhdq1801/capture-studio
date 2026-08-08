@@ -364,6 +364,11 @@ export const cloudLogin = (email: string, password: string) =>
   invoke<AccountStatus>("cloud_login", { email, password });
 export const cloudLogout = () => invoke<void>("cloud_logout");
 export const getAccountStatus = () => invoke<AccountStatus | null>("get_account_status");
+/**
+ * Close the account and erase the cloud copies, the links to them, and the email address.
+ * Irreversible. The local library is not affected.
+ */
+export const deleteAccount = () => invoke<void>("delete_account");
 export const getPricing = () => invoke<Pricing>("get_pricing");
 export const createPaypalSubscription = (tier: string, interval: PlanInterval) =>
   invoke<string>("create_paypal_subscription", { tier, interval });

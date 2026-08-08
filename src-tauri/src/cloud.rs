@@ -203,6 +203,29 @@ pub async fn create_payos_payment(
     .await
 }
 
+/// Close the account and erase what the server holds: uploaded files, their links, and the
+/// email address. The local session is dropped afterwards whatever the server said — the
+/// token is worthless either way, and leaving it behind would show a signed-in account that
+/// no longer exists.
+///
+/// Files in the local library are untouched. This deletes the cloud copies only.
+#[tauri::command]
+pub async fn delete_account(cloud: tauri::State<'_, CloudState>) -> Result<(), String> {
+    let token = require_token(&cloud)?;
+    let res = Client::new()
+        .post(format!("{API_BASE}/account/delete"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let outcome: Result<serde_json::Value, String> = parse_json(res).await;
+
+    clear_session();
+    *cloud.lock().map_err(|e| e.to_string())? = None;
+
+    outcome.map(|_| ())
+}
+
 /// The plan ladder. Unauthenticated on the server, so this needs no token — someone deciding
 /// whether to sign up has to be able to see the prices first.
 #[tauri::command]

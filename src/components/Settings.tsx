@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import {
   AccountStatus,
   CodecOption,
@@ -30,6 +31,7 @@ import {
   setAutostart,
   getAccountStatus,
   cloudLogout,
+  deleteAccount,
   getPricing,
   createPaypalSubscription,
   createPayosPayment,
@@ -252,6 +254,32 @@ export function Settings({
       toast("Logged out");
     } catch (e) {
       toast(String(e), "err");
+    }
+  };
+
+  /**
+   * Two steps, and the second one names what is about to be lost rather than asking "are you
+   * sure". The wording says "cloud copies" every time, because the thing people actually fear
+   * here is losing the screenshots on their own disk, and those are never touched.
+   */
+  const [closing, setClosing] = useState(false);
+  const closeAccount = async () => {
+    const stored = account ? formatBytes(account.storageUsedBytes) : "your uploads";
+    const ok = await confirmDialog(
+      `This deletes your cloud account, every file you have uploaded (${stored}) and every link you have shared. Links you have already sent to other people will stop working. Screenshots in your local library stay on this computer.\n\nThis cannot be undone.`,
+      { title: "Delete cloud account?", kind: "warning", okLabel: "Delete everything", cancelLabel: "Keep my account" }
+    ).catch(() => false);
+    if (!ok) return;
+
+    setClosing(true);
+    try {
+      await deleteAccount();
+      onAccountChange(null);
+      toast("Cloud account deleted");
+    } catch (e) {
+      toast(String(e), "err");
+    } finally {
+      setClosing(false);
     }
   };
 
@@ -702,6 +730,24 @@ export function Settings({
               <button className="btn ghost" style={{ marginTop: 10 }} onClick={refreshStatus}>
                 I've paid — refresh status
               </button>
+
+              {/* Kept at the bottom, behind its own divider, and never beside Log out — the
+                  two are one careless click apart and only one of them is reversible. */}
+              <div
+                style={{
+                  borderTop: "1px solid var(--border)",
+                  marginTop: 18,
+                  paddingTop: 14,
+                }}
+              >
+                <button className="btn ghost sm" onClick={closeAccount} disabled={closing}>
+                  {closing ? <i className="spin" /> : "Delete cloud account"}
+                </button>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  Removes your uploads and shared links from our servers. Screenshots on this
+                  computer are not affected.
+                </div>
+              </div>
             </div>
           )}
         </div>
