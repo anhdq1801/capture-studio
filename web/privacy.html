@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — Capture Studio</title>
+    <meta
+      name="description"
+      content="What Capture Studio stores, where it stores it, and how long it keeps it."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+  </head>
+  <body>
+    <div class="ruler"></div>
+
+    <div class="wrap">
+      <header class="masthead">
+        <a class="logo" href="/">
+          <span class="logo-mark" aria-hidden="true"></span>
+          Capture Studio
+        </a>
+        <nav class="nav">
+          <a href="/pricing.html">Pricing</a>
+          <a href="/privacy.html" aria-current="page">Privacy</a>
+          <a href="/terms.html">Terms</a>
+        </nav>
+      </header>
+    </div>
+
+    <div class="wrap narrow doc">
+      <p class="draft">
+        Draft. This describes how the software behaves today, checked against the source. It
+        still needs review by someone qualified before you take payments, and it must be
+        updated whenever the data the service handles changes.
+      </p>
+
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated [[EFFECTIVE_DATE]]</p>
+
+      <p>
+        This explains what [[LEGAL_ENTITY]] stores when you use Capture Studio, why, and for how
+        long. The short version: without an account we store nothing at all, and with one we
+        store your email, your billing status, and the files you choose to upload.
+      </p>
+
+      <h2>Screenshots stay on your computer</h2>
+      <p>
+        Capture Studio is a desktop application. Screenshots, recordings and annotations are
+        written to a folder on your own disk that you choose, and are never sent anywhere by
+        default. There is no background sync and no telemetry about what you capture.
+      </p>
+      <p>
+        A capture leaves your computer only when you press Upload on that specific capture, and
+        only if you have an account with an active plan.
+      </p>
+
+      <h2>What we store when you have an account</h2>
+      <ul>
+        <li>
+          <strong>Your email address</strong> — to identify the account, and to contact you
+          about the service.
+        </li>
+        <li>
+          <strong>Your password, hashed</strong> — put through a one-way function with a random
+          salt. We cannot read it, and we cannot tell you what it is.
+        </li>
+        <li>
+          <strong>Subscription and payment records</strong> — which plan you are on, when the
+          period ends, the amount and currency of each payment, and the reference our payment
+          provider gave it. We never see or store your card number.
+        </li>
+        <li>
+          <strong>Files you upload</strong>, and for each one its size, the time it was
+          uploaded, and the identifier it has inside the app. The size is what your storage
+          quota is measured against.
+        </li>
+      </ul>
+      <p>
+        We do not run advertising, we do not build profiles, and we do not sell or rent any of
+        this to anybody.
+      </p>
+
+      <h2>Uploaded files are public to anyone with the link</h2>
+      <p>
+        This is the most important thing on this page. An upload gets a URL that works for
+        anyone who has it. It is not indexed and not listed, but it is not protected either —
+        no password, no login check. Anyone you send the link to can pass it on.
+      </p>
+      <p>
+        Treat every upload as public. Do not upload screenshots containing passwords, keys,
+        personal data belonging to other people, or anything else you would not put on a public
+        web page.
+      </p>
+      <p>
+        We may open an uploaded file when investigating a report of abuse or a support request
+        you have raised. We do not otherwise look at them.
+      </p>
+
+      <h2>Where it is stored</h2>
+      <p>
+        Accounts, subscriptions and upload records are held in a Cloudflare D1 database.
+        Uploaded files are held in Cloudflare R2 object storage. Both run on Cloudflare's
+        global infrastructure, which means your data may be processed outside the country you
+        live in.
+      </p>
+      <p>
+        Payments are processed by [[PAYMENT_PROVIDER]], who handle the card details themselves
+        and pass us only the result. Their own privacy policy covers that part.
+      </p>
+
+      <h2>How long we keep it</h2>
+      <ul>
+        <li>
+          <strong>Uploaded files:</strong> for as long as your plan is active. If it ends, they
+          are kept for [[GRACE_DAYS]] days — so links you already shared keep working through a
+          failed card or a forgotten renewal — and then permanently deleted.
+        </li>
+        <li>
+          <strong>Interrupted uploads:</strong> a file that started uploading but never
+          completed is deleted automatically within a few hours.
+        </li>
+        <li>
+          <strong>A file you delete:</strong> removed from storage, and the space returns to
+          your quota.
+        </li>
+        <li>
+          <strong>Account and payment records:</strong> kept while the account exists, and after
+          closure only as long as tax and accounting rules require us to keep proof of a
+          transaction.
+        </li>
+      </ul>
+
+      <h2>Your rights</h2>
+      <p>
+        You can ask us for a copy of what we hold about you, ask us to correct it, or ask us to
+        delete your account and everything in it. Write to
+        <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a> from the address the account
+        uses and we will act within 30 days.
+      </p>
+      <p>
+        There is no self-service delete button in the app yet; deletion goes through that email
+        address until there is.
+      </p>
+
+      <h2>Cookies</h2>
+      <p>
+        This website sets no cookies and runs no analytics. The application signs you in with a
+        token stored locally on your own computer, which expires after 30 days.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        Capture Studio is not intended for children under 13, and we do not knowingly create
+        accounts for them. If you believe a child has an account, write to us and we will
+        remove it.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Traffic is encrypted in transit. Passwords are stored hashed and salted. Uploads are
+        authorised individually by our server before they can be written. No system is perfect;
+        if we discover a breach affecting your data, we will tell you.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        If this policy changes we will update the date at the top of this page, and for material
+        changes we will email account holders.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        [[LEGAL_ENTITY]], [[REGISTERED_ADDRESS]] ·
+        <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a>
+      </p>
+    </div>
+
+    <div class="wrap">
+      <footer class="foot">
+        <span>© <span id="year">2026</span> [[LEGAL_ENTITY]]</span>
+        <a href="/">Home</a>
+        <a href="/pricing.html">Pricing</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/refund.html">Refunds</a>
+        <span class="spacer"></span>
+        <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a>
+      </footer>
+    </div>
+
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

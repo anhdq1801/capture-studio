@@ -1,0 +1,45 @@
+name: CI
+
+# Compiles the Rust backend and typechecks the frontend on Windows only.
+# This is what actually proves the #[cfg(target_os = "windows")] code paths
+# compile — cargo check on a Mac never touches them. macOS checks don't need
+# CI: run `npx tsc --noEmit` / `cd src-tauri && cargo check` locally anytime.
+#
+# Manual trigger only (no push/PR trigger) to keep Actions-minute usage at
+# zero unless you explicitly ask for it — that quota is shared across all
+# your repos (including AltaVn). Run it from the Actions tab, or
+# `gh workflow run ci.yml`, whenever you actually want the check.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck frontend
+        run: npx tsc --noEmit
+
+      - name: Check Rust backend
+        working-directory: src-tauri
+        run: cargo check --all-targets

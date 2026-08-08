@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Select region</title>
+    <style>
+      html,
+      body,
+      #overlay-root {
+        margin: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        cursor: crosshair;
+        user-select: none;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay-root"></div>
+    <script type="module" src="/src/overlay.tsx"></script>
+  </body>
+</html>

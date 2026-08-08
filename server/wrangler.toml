@@ -1,0 +1,52 @@
+name = "capture-studio-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# MVP: served on the default *.workers.dev subdomain. Attach a custom domain
+# (e.g. api.yourapp.com) later via `routes = [...]` once you have one — no
+# code changes needed, see server/README.md.
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "capture-studio-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID" # from `wrangler d1 create capture-studio-db`
+
+# Presigning still goes through aws4fetch against R2's S3 endpoint, because the binding API
+# cannot mint a URL an external client (the desktop app) can PUT to. The binding is added as
+# well because everything the server does *itself* — checking an uploaded object's real size,
+# deleting orphans, sweeping lapsed accounts — is simpler and cheaper through it than
+# re-signing S3 requests from the Worker.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "capture-studio-uploads"
+
+# Nightly at 03:00 UTC: delete objects that were never confirmed, and reclaim storage from
+# accounts whose subscription lapsed more than the grace period ago. Without this the bucket
+# only ever grows and a lapsed account costs money forever.
+[triggers]
+crons = ["0 3 * * *"]
+
+[vars]
+# PUBLIC_R2_URL must be a CUSTOM DOMAIN attached to the bucket, not the *.r2.dev URL.
+# Cloudflare's docs are explicit: "Public access through r2.dev subdomains is rate-limited
+# and should only be used for development purposes", and "to enable access management,
+# cache, and bot management features, you must set up a custom domain". Without a custom
+# domain there is no CDN cache in front of the bucket, so every single image view becomes a
+# billed Class B read against R2 — which is what makes the $3 plan profitable or not.
+PUBLIC_R2_URL = "https://REPLACE_WITH_CUSTOM_DOMAIN"
+R2_BUCKET = "capture-studio-uploads"
+
+# Secrets (set via `wrangler secret put <NAME>`, never committed):
+#   JWT_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+#   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID, PAYPAL_API_BASE,
+#   PAYPAL_PLAN_IDS, PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY
+#
+# PAYPAL_PLAN_IDS is a JSON object mapping "<tier>:<interval>" to a PayPal billing-plan id.
+# One plan has to exist in the PayPal dashboard for every price point in src/pricing.ts:
+#
+#   {"5gb:monthly":"P-…","5gb:annual":"P-…","25gb:monthly":"P-…","25gb:annual":"P-…",
+#    "50gb:monthly":"P-…","50gb:annual":"P-…","100gb:monthly":"P-…","100gb:annual":"P-…"}
+#
+# A tier whose key is missing is refused at checkout with a 503 rather than silently billed
+# against some other plan.

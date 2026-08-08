@@ -1,0 +1,66 @@
+[package]
+name = "capture-studio"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "capture_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Full DWARF for 697 crates is what made `target/` grow past 10 GB. Line tables still give
+# panics a file and line number — which is the only debug information this project has ever
+# actually used — while dropping the per-variable and per-type records that a step debugger
+# would need. Set `debug = true` here if you ever do need to run lldb.
+[profile.dev]
+debug = "line-tables-only"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-shell = "2.3.5"
+xcap = "0.9.8"
+image = "0.25.10"
+oxipng = "10.1.1"
+chrono = "0.4.45"
+dirs = "6.0.0"
+base64 = "0.23.1"
+webp = "0.3.1"
+tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-autostart = "2.5.1"
+arboard = "3.6.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["fs"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+# Licence keys are verified against a public key compiled into the binary — no licence
+# server, no activation call, nothing to phone home to. The local app stays fully offline.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Text recognition runs on the OS's own engine — Vision on macOS — so OCR stays offline and
+# adds no model files to the bundle. The project already depends on 26 objc2 crates for the
+# rest of its macOS integration, so this is one more of the same family, not a new toolchain.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSData", "NSValue", "NSGeometry", "NSError", "NSLocale"] }
+objc2-vision = { version = "0.3", features = [
+    "VNRequest",
+    "VNRequestHandler",
+    "VNObservation",
+    "VNRecognizeTextRequest",
+    "VNTypes",
+] }
+

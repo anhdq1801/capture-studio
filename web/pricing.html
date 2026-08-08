@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pricing — Capture Studio</title>
+    <meta
+      name="description"
+      content="Capture Studio is free. Cloud storage and shareable links are a paid plan, priced by how much storage you want."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <!-- Origin of the Capture Studio API. Prices are read from it at load; they are never
+         written into this page, so the site and the checkout cannot disagree. -->
+    <script>
+      window.CAPTURE_STUDIO_API = "[[API_BASE_URL]]";
+    </script>
+  </head>
+  <body>
+    <div class="ruler"></div>
+
+    <div class="wrap">
+      <header class="masthead">
+        <a class="logo" href="/">
+          <span class="logo-mark" aria-hidden="true"></span>
+          Capture Studio
+        </a>
+        <nav class="nav">
+          <a href="/pricing.html" aria-current="page">Pricing</a>
+          <a href="/privacy.html">Privacy</a>
+          <a href="/terms.html">Terms</a>
+        </nav>
+      </header>
+
+      <section class="band" style="margin-top: 40px">
+        <p class="eyebrow">Plans</p>
+        <h2>The app is free. Storage is what you pay for.</h2>
+        <p>
+          Capturing, annotating, text recognition, recording and the image optimiser cost
+          nothing and work without an account. A plan adds cloud upload and shareable links,
+          and the only thing that changes between plans is how much you can store.
+        </p>
+
+        <div class="toggle" role="group" aria-label="Billing period">
+          <button type="button" data-interval="annual" aria-pressed="true">Yearly</button>
+          <button type="button" data-interval="monthly" aria-pressed="false">Monthly</button>
+        </div>
+
+        <ul class="tiers" data-tiers></ul>
+
+        <div class="notice" data-pricing-fallback hidden>
+          Plans could not be loaded just now. Open Capture Studio and go to Settings → Account
+          for current prices, or email
+          <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a> and we will send them to
+          you.
+        </div>
+      </section>
+
+      <section class="band">
+        <h2>What a plan includes</h2>
+        <ul class="features">
+          <li>
+            <span class="keycap">Upload</span>
+            <div>
+              <p>
+                Send any capture to the cloud from the editor or the detail view, and get a
+                link on your clipboard.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="keycap">Links</span>
+            <div>
+              <p>
+                A direct URL to the image. Anyone with the link can open it, so treat uploads
+                as public.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="keycap">Storage</span>
+            <div>
+              <p>
+                Your quota covers everything you have uploaded. Delete an upload and the space
+                comes back.
+              </p>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="band">
+        <h2>Answers before you buy</h2>
+        <ul class="features">
+          <li>
+            <span class="keycap">Ending</span>
+            <div>
+              <h3>What happens if I stop paying?</h3>
+              <p>
+                Uploaded files and their links keep working for
+                <span data-grace-days>30</span> days after a plan ends, then they are deleted.
+                Everything in your local library stays on your computer, untouched.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="keycap">Changing</span>
+            <div>
+              <h3>Can I move between plans?</h3>
+              <p>
+                Yes. If you move down to a plan smaller than what you are storing, you will
+                need to delete some uploads before the smaller quota applies.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span class="keycap">Refunds</span>
+            <div>
+              <h3>What if it is not for me?</h3>
+              <p>
+                See the <a href="/refund.html">refund policy</a>. Short version: write to us
+                within [[REFUND_WINDOW_DAYS]] days of a payment and we will refund it.
+              </p>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="wrap">
+      <footer class="foot">
+        <span>© <span id="year">2026</span> [[LEGAL_ENTITY]]</span>
+        <a href="/">Home</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/refund.html">Refunds</a>
+        <span class="spacer"></span>
+        <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a>
+      </footer>
+    </div>
+
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+    <script src="/assets/site.js"></script>
+  </body>
+</html>
