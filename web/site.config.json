@@ -1,0 +1,17 @@
+{
+  "LEGAL_ENTITY": "",
+  "REGISTERED_ADDRESS": "",
+  "SUPPORT_EMAIL": "",
+  "SUPPORT_RESPONSE_DAYS": "",
+  "JURISDICTION": "",
+  "EFFECTIVE_DATE": "",
+  "PAYMENT_PROVIDER": "",
+  "GRACE_DAYS": "30",
+  "REFUND_WINDOW_DAYS": "",
+  "API_BASE_URL": "",
+  "DOWNLOAD_URL": "",
+  "SHOT_EDITOR": "",
+  "SHOT_OVERLAY": "",
+  "SHOT_OCR": "",
+  "SHOT_LIBRARY": ""
+}
