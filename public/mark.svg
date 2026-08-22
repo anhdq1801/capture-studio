@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Capture Studio">
+  <!-- The sidebar tile, at favicon size: the same two concentric rings the menu bar uses, on
+       the brand square. A bare white mark would be invisible against a light background, and a
+       bare purple one gets lost against the app's own dark chrome. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d5efc"/>
+      <stop offset="1" stop-color="#b16cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="30" fill="url(#tile)"/>
+  <!-- Radii and stroke are the tray artwork's proportions scaled to 60% of the tile, so the
+       drawn mark and the generated PNGs stay the same shape. -->
+  <g fill="none" stroke="#fff" stroke-width="5.4">
+    <circle cx="50" cy="50" r="22.5"/>
+    <circle cx="50" cy="50" r="9.9"/>
+  </g>
+</svg>
