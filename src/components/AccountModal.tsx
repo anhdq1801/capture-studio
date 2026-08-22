@@ -119,7 +119,7 @@ export function AccountModal({ onClose, onLoggedIn, toast }: Props) {
           {/* A segmented control, not filter chips. These are two states of one form, and the
               chip row read as "narrow the list below" — the same thing it means everywhere
               else in the app. */}
-          <div className="seg" role="tablist" aria-label="Log in or create an account">
+          <div className="auth-seg" role="tablist" aria-label="Log in or create an account">
             <button
               role="tab"
               aria-selected={mode === "login"}

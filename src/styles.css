@@ -1342,6 +1342,19 @@ input[readonly] {
   background: var(--bg);
 }
 
+/* The topbar sets a toolbar button beside the filter group, and the two were built to
+   different measurements — 38px against 35px, an 8px corner against a 9px one. Sized from a
+   shared height here rather than by matching paddings, which only holds until a font changes. */
+.topbar .btn,
+.topbar .seg {
+  min-height: 34px;
+}
+.topbar .btn {
+  padding: 0 13px;
+  font-size: 12.5px;
+  border-radius: 9px;
+}
+
 /* ---- Log in / Sign up ---- */
 .modal.auth {
   max-width: 440px;
@@ -1365,8 +1378,10 @@ input[readonly] {
 }
 
 /* Segmented control. Two states of one form — not the filter chips this used to borrow, which
-   mean "narrow the list below" everywhere else in the app. */
-.seg {
+   mean "narrow the list below" everywhere else in the app.
+   Its own name, not `.seg`: that one is the library's type filter, and a second definition of
+   it later in the stylesheet quietly restyled the filter instead. */
+.auth-seg {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
@@ -1377,7 +1392,7 @@ input[readonly] {
   border-radius: 9px;
   margin-bottom: 18px;
 }
-.seg button {
+.auth-seg button {
   font: inherit;
   font-size: 12.5px;
   padding: 6px 10px;
@@ -1387,10 +1402,10 @@ input[readonly] {
   color: var(--text-dim);
   cursor: pointer;
 }
-.seg button:hover {
+.auth-seg button:hover {
   color: var(--text);
 }
-.seg button.on {
+.auth-seg button.on {
   background: var(--accent);
   color: #fff;
 }
