@@ -90,7 +90,10 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="logo">◎</div>
+        {/* The same mark the menu bar uses, so the two places the app names itself agree. */}
+        <div className="logo">
+          <img src="/logo-mark.png" alt="" width={18} height={18} />
+        </div>
         <div>
           <h1>Capture Studio</h1>
           <span>Shoot · Note · Record</span>

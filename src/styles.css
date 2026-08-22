@@ -115,8 +115,12 @@ button {
   background: linear-gradient(135deg, var(--accent), #b16cff);
   display: grid;
   place-items: center;
-  font-size: 16px;
   box-shadow: 0 4px 14px rgba(109, 94, 252, 0.5);
+}
+.brand .logo img {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 .brand h1 {
   font-size: 15px;

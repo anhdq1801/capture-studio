@@ -474,7 +474,12 @@ pub fn run() {
                 })?;
 
             TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
+                // Not the app icon: that one is a full-colour tile meant for the Dock, and the
+                // menu bar wants a flat silhouette. This is the same two-ring mark reduced to
+                // alpha, marked as a template so macOS draws it white on a dark menu bar and
+                // black on a light one — a hard-coded white icon disappears in light mode.
+                .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+                .icon_as_template(true)
                 .tooltip("Capture Studio")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
