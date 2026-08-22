@@ -461,7 +461,7 @@ export default function App() {
   }, [toast]);
 
   // Single source of truth for ending a recording, whichever UI triggered it
-  // (stop-bar button or the ⇧⌘5 shortcut while already recording).
+  // (stop-bar button or the ⌃⇧5 shortcut while already recording).
   const stopActiveRecording = useCallback(async () => {
     try {
       await stopRecording();

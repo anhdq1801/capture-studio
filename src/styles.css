@@ -1270,7 +1270,7 @@ input[readonly] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Wide enough that swapping ⇧⌘2 for ⌃⌥Space doesn't shuffle the whole column. */
+/* Wide enough that swapping ⌃⇧2 for ⌃⌥Space doesn't shuffle the whole column. */
 .sc-key {
   flex: none;
   min-width: 96px;

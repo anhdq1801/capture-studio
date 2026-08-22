@@ -14,8 +14,8 @@ import {
  * The editable list of global shortcuts.
  *
  * These used to be a printed list of fixed combinations, which is fine right up until another
- * app already owns one — macOS itself owns ⇧⌘3 to ⇧⌘6 for its own screenshots — and then the
- * only thing the user could do about it was nothing.
+ * app already owns one — and on a Mac loaded with other tools that is most of the keyboard —
+ * and then the only thing the user could do about it was nothing.
  */
 export function ShortcutRecorder({
   rows,

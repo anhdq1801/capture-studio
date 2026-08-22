@@ -80,21 +80,24 @@ shortcut, press the keys you want; `Backspace` removes it, `Esc` cancels.
 
 | Action | Default |
 |--------|---------|
-| Capture Area | ⇧⌘2 |
-| Capture Screen | ⇧⌘1 |
-| Capture Window | ⇧⌘3 |
-| Scrolling Capture | ⇧⌘4 |
-| Capture Text (OCR) | ⇧⌘6 |
-| Screen Recording | ⇧⌘5 |
-| Paste Image From Clipboard | ⇧⌘V |
+| Capture Area | ⌃⇧2 |
+| Capture Screen | ⌃⇧1 |
+| Capture Window | ⌃⇧3 |
+| Scrolling Capture | ⌃⇧4 |
+| Capture Text (OCR) | ⌃⇧6 |
+| Screen Recording | ⌃⇧5 |
+| Paste Image From Clipboard | ⌃⇧V |
 
 They work anywhere, even with the window hidden in the menu bar.
 
-> **Four of these defaults collide with macOS itself.** ⇧⌘3, ⇧⌘4, ⇧⌘5 and ⇧⌘6 belong to Apple's
-> own screenshot tools, and macOS wins. If one of them does nothing, that is why — rebind it in
-> Settings. The same goes for any combination another app already holds: Settings marks a row
-> *in use elsewhere* when the system refuses it outright, but an app that grabs keys through an
-> event tap shadows ours silently, so "nothing happens" is the symptom to watch for.
+That is **Control**, not Command. macOS keeps ⇧⌘3 through ⇧⌘6 for its own screenshot tools and
+wins every one of them, so a ⇧⌘ set would arrive with four of its seven shortcuts already dead.
+⌃⇧ is clear at the system level. (On Windows the same defaults read as `Ctrl+Shift+…`.)
+
+> **If a shortcut does nothing, something else on your Mac owns it.** Settings marks a row
+> *in use elsewhere* when the system refuses the registration outright — but an app that grabs
+> keys through an event tap shadows ours without any error, so silence is the symptom to watch
+> for. Rebind and move on.
 
 ---
 
@@ -158,9 +161,9 @@ npm run tauri build
 
 The installers land in `src-tauri\target\release\bundle\` — `.msi` (WiX) and `.exe` (NSIS).
 
-Two things that will differ from macOS if you get it running: the global shortcuts bind
-`Ctrl+Shift+…` instead of `⇧⌘…`, and capturing what you hear needs a loopback audio device
-(Stereo Mix, or a virtual audio cable). Microphones work as they are.
+One thing that differs from macOS if you get it running: capturing what you hear needs a
+loopback audio device (Stereo Mix, or a virtual audio cable). Microphones work as they are. The
+shortcuts are the same `Ctrl+Shift+…` on both platforms.
 
 ---
 

@@ -7,13 +7,13 @@ import { getAppSettings, setShortcuts as setShortcutsCmd } from "./api";
  * settings have loaded, not so the two can disagree.
  */
 export const SHORTCUT_DEFAULTS = {
-  "capture-region": "CommandOrControl+Shift+2",
-  "capture-full": "CommandOrControl+Shift+1",
-  "capture-window": "CommandOrControl+Shift+3",
-  "capture-scroll": "CommandOrControl+Shift+4",
-  record: "CommandOrControl+Shift+5",
-  "capture-text": "CommandOrControl+Shift+6",
-  clipboard: "CommandOrControl+Shift+V",
+  "capture-region": "Control+Shift+2",
+  "capture-full": "Control+Shift+1",
+  "capture-window": "Control+Shift+3",
+  "capture-scroll": "Control+Shift+4",
+  record: "Control+Shift+5",
+  "capture-text": "Control+Shift+6",
+  clipboard: "Control+Shift+V",
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUT_DEFAULTS;
@@ -28,7 +28,7 @@ const isMac =
  * Every surface that prints a shortcut reads from here.
  *
  * The alternative — each component holding its own copy of the settings — is how the sidebar
- * ends up promising ⇧⌘2 for the rest of the session after the user has rebound it in Settings.
+ * ends up promising ⌃⇧2 for the rest of the session after the user has rebound it in Settings.
  * A module-level store is enough: there is one set of shortcuts per app, not per subtree.
  */
 let current: ShortcutMap = { ...SHORTCUT_DEFAULTS };
@@ -166,7 +166,7 @@ const KEY_LABELS: Record<string, string> = {
 };
 
 /**
- * Render an accelerator the way this platform writes it: ⇧⌘2 on macOS, Ctrl+Shift+2 elsewhere.
+ * Render an accelerator the way this platform writes it: ⌃⇧2 on macOS, Ctrl+Shift+2 elsewhere.
  * Showing Mac glyphs to a Windows user describes keys that do not exist there.
  */
 export function formatAccelerator(combo: string): string {

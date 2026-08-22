@@ -34,11 +34,13 @@ pub const SHORTCUTS: [(&str, &str, &str); 7] = [
 
 /// Accelerator for a default capture shortcut.
 ///
-/// `Cmd` is a macOS-only token — the global-shortcut plugin fails to parse it on Windows and
-/// the error was being swallowed, so every shortcut silently did nothing there while the UI
-/// still advertised them. `CommandOrControl` resolves to ⌘ on macOS and Ctrl elsewhere.
+/// Control rather than Command, because macOS owns ⇧⌘3 through ⇧⌘6 for its own screenshot
+/// tools and wins every one of them — four of the seven defaults were dead on arrival. ⌃⇧ is
+/// clear at the system level, and the token means Ctrl on Windows too, so one string covers
+/// both platforms. (`Cmd` would not: it is macOS-only and the plugin fails to parse it
+/// elsewhere.)
 pub fn accel(key: &str) -> String {
-    format!("CommandOrControl+Shift+{key}")
+    format!("Control+Shift+{key}")
 }
 
 pub fn default_shortcuts() -> HashMap<String, String> {

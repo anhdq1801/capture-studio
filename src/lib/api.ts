@@ -95,7 +95,7 @@ export interface AppSettings {
   codec: string;
   /** BCP-47 tags in priority order, e.g. ["vi-VT", "en-US"]. */
   ocrLanguages: string[];
-  /** Accelerator per shortcut id, e.g. `{"capture-region": "CommandOrControl+Shift+2"}`. */
+  /** Accelerator per shortcut id, e.g. `{"capture-region": "Control+Shift+2"}`. */
   shortcuts: Record<string, string>;
 }
 

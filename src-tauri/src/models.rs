@@ -153,7 +153,7 @@ pub struct AppSettings {
     #[serde(default = "default_ocr_languages")]
     pub ocr_languages: Vec<String>,
     /// The global shortcut for each capture action, keyed by the ids in `settings::SHORTCUTS`
-    /// and written the way Tauri parses accelerators (`CommandOrControl+Shift+2`).
+    /// and written the way Tauri parses accelerators (`Control+Shift+2`).
     ///
     /// A key that is present but empty means the user deliberately unbound that action; a key
     /// that is missing entirely means they have never touched it and it keeps its shipped

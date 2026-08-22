@@ -176,7 +176,7 @@ fn show_main(app: &tauri::AppHandle) {
 /// the rest are still bound: one rejected combination must not cost the user the other six.
 ///
 /// The list is not a guarantee, which is why Settings words its warning carefully. macOS hands
-/// a hot key to whoever asked first only among apps that ask the same way; one holding ⇧⌘4
+/// a hot key to whoever asked first only among apps that ask the same way; one holding ⌃⇧4
 /// through an event tap shadows ours without this ever seeing an error.
 fn apply_shortcuts(app: &tauri::AppHandle, shortcuts: &HashMap<String, String>) -> Vec<String> {
     let gs = app.global_shortcut();
@@ -240,7 +240,7 @@ fn rebuild_tray_menu(app: &tauri::AppHandle, dark: bool) {
 ///
 /// A registered hot key is taken by the system before the focused app sees the keypress, so
 /// without this the only combinations that could be recorded are the ones not already bound:
-/// pressing ⇧⌘2 to move it somewhere else would fire a capture instead of being read.
+/// pressing ⌃⇧2 to move it somewhere else would fire a capture instead of being read.
 #[tauri::command]
 fn pause_shortcuts(
     app: tauri::AppHandle,
