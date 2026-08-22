@@ -16,6 +16,7 @@ export default defineConfig(async () => ({
         stopbar: "stopbar.html",
         scrollbar: "scrollbar.html",
         regionhint: "regionhint.html",
+        editor: "editor.html",
       },
     },
   },

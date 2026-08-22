@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import {
   MediaItem,
   deleteItem,
@@ -213,7 +214,8 @@ export function AnnotationEditor({
 
   // The editor was the one dialog with no keyboard exit and no undo shortcut — unusual for
   // a Shottr-style tool and undiscoverable. Escape closes (discarding a draft, as the
-  // toolbar's Close does); ⌘Z / Ctrl+Z steps back through the annotations.
+  // toolbar's Close does); ⌘Z / Ctrl+Z steps back through the annotations; ⌘C copies the
+  // annotated image, which is what a screenshot tool is usually opened to do.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -226,6 +228,12 @@ export function AnnotationEditor({
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         undo();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+        // Deliberately taking ⌘C even when a shape is selected. There is no shape clipboard
+        // to copy into, so the alternative is a shortcut that silently does nothing on the
+        // one selection the user is most likely to have made.
+        e.preventDefault();
+        copy();
       } else if (selected !== null && (e.key === "Backspace" || e.key === "Delete")) {
         e.preventDefault();
         setShapes((prev) => prev.filter((_, i) => i !== selected));
@@ -241,6 +249,18 @@ export function AnnotationEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // The editor owns its own window now, and that window's title-bar close button is outside
+  // React. It cancels the native close and sends this instead, so both routes out of the
+  // editor run the same discard-the-draft path.
+  useEffect(() => {
+    const un = listen("editor-close-request", () => {
+      close();
+    });
+    return () => {
+      un.then((f) => f());
+    };
   });
 
   // Focus the inline text box after it has actually mounted and the browser has finished

@@ -30,6 +30,7 @@ import {
 } from "./lib/api";
 import { OverlayMode, openRegionOverlay, prewarmRegionOverlays } from "./lib/overlay";
 import { loadShortcuts } from "./lib/shortcuts";
+import { openEditorWindow } from "./lib/editorwindow";
 import { openStopBar, closeStopBar } from "./lib/stopbar";
 import { openScrollBar, closeScrollBar } from "./lib/scrollbar";
 import { hideRegionHint } from "./lib/regionhint";
@@ -39,7 +40,6 @@ import { DetailModal } from "./components/DetailModal";
 import { OptimizeModal } from "./components/OptimizeModal";
 import { BeautifyModal } from "./components/BeautifyModal";
 import { RecordModal } from "./components/RecordModal";
-import { AnnotationEditor } from "./components/AnnotationEditor";
 import { Optimizer } from "./components/Optimizer";
 import { Settings, Tab as SettingsTab } from "./components/Settings";
 import { LicenseBar } from "./components/LicenseBar";
@@ -61,7 +61,6 @@ export default function App() {
   const [detail, setDetail] = useState<MediaItem | null>(null);
   const [optimizeTarget, setOptimizeTarget] = useState<MediaItem | null>(null);
   const [beautifyTarget, setBeautifyTarget] = useState<MediaItem | null>(null);
-  const [annotateTarget, setAnnotateTarget] = useState<MediaItem | null>(null);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [selecting, setSelecting] = useState(false);
@@ -144,7 +143,6 @@ export default function App() {
    */
   const needSubscription = useCallback(() => {
     setDetail(null);
-    setAnnotateTarget(null);
     setView("settings");
     setSettingsTab("account");
     if (!account) {
@@ -185,13 +183,25 @@ export default function App() {
     if (focus) await win.setFocus();
   }, []);
 
-  const openEditorForCapture = useCallback(async (item: MediaItem) => {
-    hidForCapture.current = false;
-    const win = getCurrentWindow();
-    await win.show();
-    await win.setFocus();
-    setAnnotateTarget(item);
-  }, []);
+  /**
+   * Hand a fresh capture to the editor window.
+   *
+   * This used to drag the main window on screen first, which meant a screenshot taken from the
+   * menu bar ended with the whole application in front of you — sidebar, library, whichever
+   * screen you were last on — behind one image. The editor is its own window now, and the app
+   * only comes back if it was already open when the capture started.
+   */
+  const openEditorForCapture = useCallback(
+    async (item: MediaItem) => {
+      await restoreAfterCapture(false);
+      try {
+        await openEditorWindow(item);
+      } catch (e) {
+        toast(String(e), "err");
+      }
+    },
+    [restoreAfterCapture, toast]
+  );
 
   // The region overlay notifies us when a screenshot was captured.
   useEffect(() => {
@@ -599,6 +609,26 @@ export default function App() {
     };
   }, [toast, restoreAfterCapture]);
 
+  // The editor runs in its own window, so anything it does that the app is showing has to come
+  // back over an event — there is no shared React tree left to update.
+  useEffect(() => {
+    const unSaved = listen("library-changed", () => {
+      reload();
+      getAccountStatus().then(setAccount).catch(() => {});
+    });
+    const unPaywall = listen("editor-need-subscription", async () => {
+      // The editor has already stepped aside; bring the app forward to take over.
+      const win = getCurrentWindow();
+      await win.show();
+      await win.setFocus();
+      needSubscription();
+    });
+    return () => {
+      unSaved.then((f) => f());
+      unPaywall.then((f) => f());
+    };
+  }, [reload, needSubscription]);
+
   // React to tray-menu clicks and global keyboard shortcuts (Rust emits "tray-action").
   useEffect(() => {
     const un = listen<string>("tray-action", (e) => {
@@ -823,7 +853,7 @@ export default function App() {
           }}
           onAnnotate={(it) => {
             setDetail(null);
-            setAnnotateTarget(it);
+            openEditorWindow(it).catch((e) => toast(String(e), "err"));
           }}
           onOptimize={(it) => {
             setDetail(null);
@@ -860,20 +890,6 @@ export default function App() {
           item={optimizeTarget}
           onClose={() => setOptimizeTarget(null)}
           onDone={reload}
-          toast={toast}
-        />
-      )}
-
-      {annotateTarget && (
-        <AnnotationEditor
-          item={annotateTarget}
-          subscriptionActive={!!account?.subscriptionActive}
-          onClose={() => setAnnotateTarget(null)}
-          onSaved={async () => {
-            await reload();
-            getAccountStatus().then(setAccount).catch(() => {});
-          }}
-          onNeedSubscription={needSubscription}
           toast={toast}
         />
       )}
