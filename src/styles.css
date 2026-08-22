@@ -1342,3 +1342,92 @@ input[readonly] {
   background: var(--bg);
 }
 
+/* ---- Log in / Sign up ---- */
+.modal.auth {
+  max-width: 440px;
+}
+/* What this account is for, and what it costs, said before the email field rather than after
+   the payment screen. Was a pile of inline styles on a generic box. */
+.auth-note {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.auth-note p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.auth-note .hint {
+  margin-top: 7px;
+}
+
+/* Segmented control. Two states of one form — not the filter chips this used to borrow, which
+   mean "narrow the list below" everywhere else in the app. */
+.seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  margin-bottom: 18px;
+}
+.seg button {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button.on {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* A field that failed validation says so under itself, in reach of the thing it is about. */
+.field.bad input {
+  border-color: var(--danger);
+}
+.field-err {
+  font-size: 11.5px;
+  color: var(--danger);
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+/* Input with a button parked inside its right edge. */
+.input-affix {
+  position: relative;
+}
+.input-affix input {
+  padding-right: 62px;
+}
+.affix-btn {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.affix-btn:hover {
+  color: var(--text);
+}
+
