@@ -1446,3 +1446,19 @@ input[readonly] {
   color: var(--text);
 }
 
+
+/* Reads as a link, but it is a button: it opens the browser rather than going anywhere in
+   this window. */
+.link-btn {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--accent-hi);
+  cursor: pointer;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}

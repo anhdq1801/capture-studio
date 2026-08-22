@@ -49,16 +49,34 @@ or manage — deploys as a single edge function.
    wrangler secret put PAYOS_CLIENT_ID
    wrangler secret put PAYOS_API_KEY
    wrangler secret put PAYOS_CHECKSUM_KEY
+   # Password reset email. Optional, but nobody can recover a forgotten password without it.
+   wrangler secret put RESEND_API_KEY
+   wrangler secret put MAIL_FROM             # Capture Studio <noreply@yourdomain>
    ```
 
-3. **PayPal** — developer.paypal.com → create an App (sandbox first) → create a Product + two
+   Also set `SITE_URL` in `wrangler.toml` — reset emails link to `<SITE_URL>/reset.html`, so a
+   wrong value there produces mail whose only link is broken.
+
+3. **Password reset email** — sign up at resend.com, verify the sending domain (their DNS
+   records: SPF and DKIM), create an API key, and set `RESEND_API_KEY` and `MAIL_FROM` above.
+
+   Resend rather than MailChannels: the free MailChannels route out of Cloudflare Workers was
+   withdrawn in 2024, so the "no API key needed" approach older guides describe no longer
+   exists. Any provider with an HTTP API works — `src/email.ts` is one `fetch` to swap.
+
+   Skipping this is safe but not harmless: `/auth/request-reset` keeps answering `{ok:true}`
+   and logs that it could not send, deliberately, because failing the request would turn the
+   route into a way to test which email addresses have accounts. The visible effect is that
+   reset mail never arrives and forgotten accounts stay lost.
+
+4. **PayPal** — developer.paypal.com → create an App (sandbox first) → create a Product + two
    Billing Plans (monthly $3, annual $30) → note the Plan IDs → register a Webhook pointing at
    `https://<your-worker>.workers.dev/webhooks/paypal` subscribed to
    `BILLING.SUBSCRIPTION.ACTIVATED`, `BILLING.SUBSCRIPTION.CANCELLED`,
    `BILLING.SUBSCRIPTION.EXPIRED`, `BILLING.SUBSCRIPTION.SUSPENDED`, `PAYMENT.SALE.COMPLETED`,
    `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`.
 
-4. **PayOS** — payos.vn merchant dashboard → Client ID / API Key / Checksum Key → register the
+5. **PayOS** — payos.vn merchant dashboard → Client ID / API Key / Checksum Key → register the
    webhook URL `https://<your-worker>.workers.dev/webhooks/payos`. **PayOS's API has had version
    churn — verify the exact create-payment / webhook payload and signature format in `payos.ts`
    against their current docs before going live**; this implementation follows their v2
@@ -92,6 +110,8 @@ All amounts live in `src/pricing.ts` — change values there, nothing else needs
 | Route | Auth | Purpose |
 |---|---|---|
 | `POST /auth/signup`, `/auth/login` | – | issue a 30-day JWT |
+| `POST /auth/request-reset {email}` | – | email a reset link. Always `{ok:true}`, whether or not the address is registered and whether or not the mail sent — anything else is an oracle for which emails have accounts. One per address per minute |
+| `POST /auth/reset {token,password}` | – | spend the token, set the password, sign out every earlier session, and return a fresh JWT |
 | `GET /account/status` | JWT | subscription + storage usage summary |
 | `GET /pricing` | – | the storage-tier ladder; unauthenticated so the app can show prices before signup |
 | `POST /billing/paypal/create-subscription {tier,interval}` | JWT | returns PayPal approval URL |
@@ -102,12 +122,20 @@ All amounts live in `src/pricing.ts` — change values there, nothing else needs
 
 The desktop app's Rust `cloud.rs` module (`src-tauri/src/cloud.rs`) is the only client — it PUTs
 file bytes straight to the presigned R2 URL, so upload bandwidth never passes through this Worker.
+The exception is `/auth/reset`, whose client is `web/reset.html`: proving control of an inbox
+means following a link out of an email, which cannot land inside a desktop app.
+
+Every JWT-authenticated route now also reads the user row to compare the token's `iat` against
+`users.password_changed_at`. That is one indexed primary-key lookup per request, and it is what
+makes a reset actually evict whoever prompted it — these JWTs carry no id that could be revoked
+any other way.
 
 ## Known follow-ups (not built yet)
 
 - No custom URL-scheme deep link back into the app after payment — user manually refreshes
   status, or the app short-polls for ~2 minutes after opening checkout.
-- No email receipts/renewal reminders (PayOS especially has no auto-renew).
+- No email receipts/renewal reminders (PayOS especially has no auto-renew). Password
+  reset is the only mail this service sends.
 - Deleting a local item does not delete its R2 object.
 - No refund/cancel API — PayPal subscriptions are cancelled from the user's own PayPal account.
 

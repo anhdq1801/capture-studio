@@ -1,13 +1,30 @@
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import type { Env, JwtPayload } from "./types";
-import { getUserByEmail, insertUser, newId, nowIso } from "./db";
+import {
+  applyPasswordReset,
+  createPasswordReset,
+  getPasswordReset,
+  getUserByEmail,
+  getUserById,
+  insertUser,
+  lastPasswordResetAt,
+  newId,
+  nowIso,
+} from "./db";
+import { resetEmail, sendMail } from "./email";
 
 type Vars = { userId: string; userEmail: string };
 export type AppEnv = { Bindings: Env; Variables: Vars };
 
 const PBKDF2_ITERATIONS = 100_000;
 const JWT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+/** Long enough to find the mail and follow the link, short enough that one left in an inbox
+ *  is not a standing key to the account. */
+const RESET_TTL_MINUTES = 60;
+/** One reset mail per address per minute. Without it this route is a way to have Capture
+ *  Studio send somebody a thousand emails. */
+const RESET_COOLDOWN_MS = 60_000;
 
 function toBase64Url(bytes: Uint8Array): string {
   let str = "";
@@ -116,12 +133,23 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   if (!token) return c.json({ error: "Unauthorized" }, 401);
   const payload = await verifyJwt(token, c.env.JWT_SECRET);
   if (!payload) return c.json({ error: "Unauthorized" }, 401);
+  // A token minted before the password was last changed is refused, whatever its expiry says.
+  // These JWTs carry no id to revoke, so this is what makes a reset actually evict whoever
+  // prompted it — otherwise the thief's 30-day session outlives the password it was got with.
+  const user = await getUserById(c.env, payload.sub);
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+  if (user.password_changed_at) {
+    const changedAt = Math.floor(Date.parse(user.password_changed_at) / 1000);
+    if (Number.isFinite(changedAt) && payload.iat < changedAt) {
+      return c.json({ error: "Session expired — log in again" }, 401);
+    }
+  }
   c.set("userId", payload.sub);
   c.set("userEmail", payload.email);
   await next();
 }
 
-// ---- Routes: POST /auth/signup, POST /auth/login ----
+// ---- Routes: POST /auth/signup, /auth/login, /auth/request-reset, /auth/reset ----
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -160,4 +188,87 @@ authRoutes.post("/login", async (c) => {
   }
   const token = await signJwt({ sub: user.id, email: user.email }, c.env.JWT_SECRET);
   return c.json({ token, email: user.email });
+});
+
+// ---- Password reset ----
+
+/** Tokens are compared by hash, so what is stored is never what is emailed. */
+async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return toBase64Url(new Uint8Array(digest));
+}
+
+/**
+ * Ask for a reset link.
+ *
+ * Always answers `{ ok: true }`, whether or not the address is registered and whether or not
+ * the mail went out. Any other behaviour turns this route into a way to test which email
+ * addresses have accounts, which is worth more to an attacker than the reset itself.
+ */
+authRoutes.post("/request-reset", async (c) => {
+  const body = await c.req.json<AuthBody>().catch(() => ({}) as AuthBody);
+  const email = (body.email ?? "").trim().toLowerCase();
+  const ok = c.json({ ok: true });
+  if (!isValidEmail(email)) return ok;
+
+  const user = await getUserByEmail(c.env, email);
+  if (!user) return ok;
+
+  const last = await lastPasswordResetAt(c.env, user.id);
+  if (last && Date.now() - Date.parse(last) < RESET_COOLDOWN_MS) return ok;
+
+  const token = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  const now = new Date();
+  await createPasswordReset(c.env, {
+    tokenHash: await hashToken(token),
+    userId: user.id,
+    expiresAt: new Date(now.getTime() + RESET_TTL_MINUTES * 60_000).toISOString(),
+    createdAt: now.toISOString(),
+  });
+
+  const site = (c.env.SITE_URL ?? "").replace(/\/+$/, "");
+  const link = `${site}/reset.html?token=${encodeURIComponent(token)}`;
+  await sendMail(c.env, { to: user.email, ...resetEmail(link, RESET_TTL_MINUTES) });
+  return ok;
+});
+
+type ResetBody = { token?: string; password?: string };
+
+/**
+ * Spend a reset token and set the new password.
+ *
+ * This one *does* say what went wrong. The token is the secret, not the email address, so
+ * "that link has expired" tells someone holding a dead link the only thing that helps them and
+ * tells anyone else nothing they did not already have.
+ */
+authRoutes.post("/reset", async (c) => {
+  const body = await c.req.json<ResetBody>().catch(() => ({}) as ResetBody);
+  const token = (body.token ?? "").trim();
+  const password = body.password ?? "";
+  if (!token) return c.json({ error: "This reset link is not valid" }, 400);
+  if (password.length < 8) {
+    return c.json({ error: "Password must be at least 8 characters" }, 400);
+  }
+
+  const row = await getPasswordReset(c.env, await hashToken(token));
+  if (!row || row.used_at || Date.parse(row.expires_at) < Date.now()) {
+    return c.json({ error: "This reset link has expired or has already been used" }, 400);
+  }
+
+  const at = nowIso();
+  await applyPasswordReset(c.env, {
+    userId: row.user_id,
+    tokenHash: row.token_hash,
+    passwordHash: await hashPassword(password),
+    at,
+  });
+
+  // Signed in immediately: the alternative is to send someone who has just proved control of
+  // the mailbox back to a login form to type the password they set ten seconds ago. Minted
+  // after `password_changed_at` is written, so this token outlives the eviction rather than
+  // being caught by it.
+  const user = await getUserById(c.env, row.user_id);
+  if (!user) return c.json({ error: "This reset link is not valid" }, 400);
+  const jwt = await signJwt({ sub: user.id, email: user.email }, c.env.JWT_SECRET);
+  return c.json({ token: jwt, email: user.email });
 });

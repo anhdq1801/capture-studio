@@ -30,6 +30,7 @@ import {
 } from "./lib/api";
 import { OverlayMode, openRegionOverlay, prewarmRegionOverlays } from "./lib/overlay";
 import { loadShortcuts } from "./lib/shortcuts";
+import { BUY_URL } from "./lib/links";
 import { openEditorWindow } from "./lib/editorwindow";
 import { openStopBar, closeStopBar } from "./lib/stopbar";
 import { openScrollBar, closeScrollBar } from "./lib/scrollbar";
@@ -46,7 +47,6 @@ import { LicenseBar } from "./components/LicenseBar";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 /** Where "Get a licence" goes. Replace once the storefront exists. */
-const BUY_URL = "https://example.com/capture-studio/license";
 import { AccountModal } from "./components/AccountModal";
 import { Toasts, ToastMsg } from "./components/Toasts";
 

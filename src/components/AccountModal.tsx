@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { AccountStatus, Pricing, cloudLogin, cloudSignup, getPricing } from "../lib/api";
 import { useEscapeKey } from "./Modal";
+import { RESET_URL } from "../lib/links";
 
 interface Props {
   onClose: () => void;
   onLoggedIn: (status: AccountStatus) => void;
   toast: (t: string, k?: "ok" | "err" | "info") => void;
 }
-
-/* No "Forgot your password?" here on purpose. There is nothing to link to: the Worker exposes
-   /auth/signup and /auth/login and nothing else, so no reset exists to point at, and a link to
-   a page that 404s is worse than an absent one. It belongs here the moment the route does. */
 
 export function AccountModal({ onClose, onLoggedIn, toast }: Props) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -180,6 +178,13 @@ export function AccountModal({ onClose, onLoggedIn, toast }: Props) {
               </button>
             </div>
             {errors.password && <div className="field-err">{errors.password}</div>}
+            {mode === "login" && (
+              /* Opens the site rather than asking here. The reset has to be proved by email,
+                 and a link in an email cannot open a form inside a desktop app. */
+              <button className="link-btn" onClick={() => openUrl(RESET_URL).catch(() => {})}>
+                Forgot your password?
+              </button>
+            )}
           </div>
         </div>
         <div className="modal-foot">

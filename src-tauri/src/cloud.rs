@@ -73,14 +73,23 @@ fn require_token(cloud: &tauri::State<'_, CloudState>) -> Result<String, String>
         .ok_or_else(|| "Not logged in".to_string())
 }
 
-async fn fetch_account_status(token: &str) -> Result<AccountStatus, String> {
+/// `Ok(None)` means the server rejected the token rather than that something went wrong.
+///
+/// A stored session can stop working without the user doing anything here: it expires after
+/// thirty days, and a password reset deliberately signs out every session that existed before
+/// it. Reporting that as an error would leave the app insisting it is logged in and failing
+/// every request with a message the user cannot act on.
+async fn fetch_account_status(token: &str) -> Result<Option<AccountStatus>, String> {
     let res = Client::new()
         .get(format!("{API_BASE}/account/status"))
         .bearer_auth(token)
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    parse_json(res).await
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(None);
+    }
+    parse_json(res).await.map(Some)
 }
 
 // ---- Auth commands ----
@@ -123,7 +132,11 @@ async fn finish_login(
 ) -> Result<AccountStatus, String> {
     let session = Session { token: auth.token, email: auth.email };
     save_session(&session)?;
-    let status = fetch_account_status(&session.token).await?;
+    // A token minted seconds ago being refused is the server contradicting itself, not a
+    // credential problem — so it must not be reported as one.
+    let status = fetch_account_status(&session.token)
+        .await?
+        .ok_or_else(|| "The server rejected a session it had just issued".to_string())?;
     *cloud.lock().map_err(|e| e.to_string())? = Some(session);
     Ok(status)
 }
@@ -145,7 +158,17 @@ pub async fn get_account_status(
     };
     match token {
         None => Ok(None),
-        Some(t) => fetch_account_status(&t).await.map(Some),
+        Some(t) => {
+            let status = fetch_account_status(&t).await?;
+            // Forget a session the server has stopped honouring, so the app offers a login
+            // rather than showing an account it can no longer act on.
+            if status.is_none() {
+                clear_session();
+                let mut guard = cloud.lock().map_err(|e| e.to_string())?;
+                *guard = None;
+            }
+            Ok(status)
+        }
     }
 }
 

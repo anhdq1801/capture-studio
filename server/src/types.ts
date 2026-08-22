@@ -8,6 +8,18 @@ export interface Env {
 
   JWT_SECRET: string;
 
+  /**
+   * Transactional email, used only by password reset. Both are optional: without them the
+   * reset route still answers normally and logs that it could not send, rather than 500ing
+   * and telling an attacker which addresses are registered.
+   */
+  RESEND_API_KEY?: string;
+  /** Envelope sender, e.g. `Capture Studio <noreply@capturestudio.app>`. Must be a domain
+   *  verified with the mail provider. */
+  MAIL_FROM?: string;
+  /** Origin of the marketing site, used to build the link in the reset email. */
+  SITE_URL?: string;
+
   R2_ACCOUNT_ID: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
@@ -42,6 +54,17 @@ export interface UserRow {
   id: string;
   email: string;
   password_hash: string;
+  created_at: string;
+  /** Set by a password reset; sessions issued before it are refused. Null for accounts whose
+   *  password has never been changed. */
+  password_changed_at: string | null;
+}
+
+export interface PasswordResetRow {
+  token_hash: string;
+  user_id: string;
+  expires_at: string;
+  used_at: string | null;
   created_at: string;
 }
 

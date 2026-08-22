@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reset your password — Capture Studio</title>
+    <meta name="description" content="Set a new password for your Capture Studio account." />
+    <!-- A reset link is a one-time credential. Keeping it out of referrers stops it leaking to
+         anything this page loads, and out of search results if one is ever posted publicly. -->
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <script>
+      window.CAPTURE_STUDIO_API = "[[API_BASE_URL]]";
+    </script>
+  </head>
+  <body>
+    <div class="ruler"></div>
+
+    <div class="wrap">
+      <header class="masthead">
+        <a class="logo" href="/">
+          <span class="logo-mark" aria-hidden="true"></span>
+          Capture Studio
+        </a>
+        <nav class="nav">
+          <a href="/pricing.html">Pricing</a>
+          <a href="/privacy.html">Privacy</a>
+          <a href="/terms.html">Terms</a>
+        </nav>
+      </header>
+
+      <section class="band auth-band" style="margin-top: 40px">
+        <!-- Step one: no token in the URL, so ask where to send the link. -->
+        <form id="request" hidden>
+          <p class="eyebrow">Account</p>
+          <h2>Reset your password</h2>
+          <p>
+            Enter the email address on your account and we will send you a link to choose a new
+            password. The link is good for 60 minutes.
+          </p>
+          <label class="field">
+            <span>Email</span>
+            <input type="email" name="email" autocomplete="username" required placeholder="you@example.com" />
+          </label>
+          <button class="btn" type="submit">Send the link</button>
+          <p class="form-msg" data-msg></p>
+        </form>
+
+        <!-- Step two: arrived from the email, so take the new password. -->
+        <form id="choose" hidden>
+          <p class="eyebrow">Account</p>
+          <h2>Choose a new password</h2>
+          <p>
+            Pick something at least 8 characters long. Setting it signs out anything already
+            logged in to this account, on every computer.
+          </p>
+          <label class="field">
+            <span>New password</span>
+            <input
+              type="password"
+              name="password"
+              autocomplete="new-password"
+              minlength="8"
+              required
+              placeholder="At least 8 characters"
+            />
+          </label>
+          <label class="field">
+            <span>Repeat it</span>
+            <input type="password" name="confirm" autocomplete="new-password" required />
+          </label>
+          <button class="btn" type="submit">Set new password</button>
+          <p class="form-msg" data-msg></p>
+        </form>
+
+        <!-- Both steps end here rather than leaving the form on screen looking unfinished. -->
+        <div id="done" hidden>
+          <p class="eyebrow">Account</p>
+          <h2 data-done-title></h2>
+          <p data-done-body></p>
+          <a class="btn quiet" href="/">Back to the site</a>
+        </div>
+      </section>
+    </div>
+
+    <div class="wrap">
+      <footer class="foot">
+        <span>© <span id="year">2026</span> [[LEGAL_ENTITY]]</span>
+        <a href="/">Home</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/refund.html">Refunds</a>
+        <span class="spacer"></span>
+        <a href="mailto:[[SUPPORT_EMAIL]]">[[SUPPORT_EMAIL]]</a>
+      </footer>
+    </div>
+
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+
+      const API = (window.CAPTURE_STUDIO_API || "").replace(/\/+$/, "");
+      const token = new URLSearchParams(location.search).get("token");
+      const request = document.getElementById("request");
+      const choose = document.getElementById("choose");
+      const done = document.getElementById("done");
+
+      function finish(title, body) {
+        request.hidden = choose.hidden = true;
+        done.querySelector("[data-done-title]").textContent = title;
+        done.querySelector("[data-done-body]").textContent = body;
+        done.hidden = false;
+      }
+
+      function say(form, text, bad) {
+        const el = form.querySelector("[data-msg]");
+        el.textContent = text;
+        el.className = "form-msg" + (bad ? " bad" : "");
+      }
+
+      // Which of the two forms this visit is depends only on whether the email link brought a
+      // token along.
+      (token ? choose : request).hidden = false;
+
+      request.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = request.querySelector("button");
+        btn.disabled = true;
+        say(request, "Sending…");
+        try {
+          await fetch(API + "/auth/request-reset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: request.email.value.trim() }),
+          });
+          // Deliberately the same message whether or not that address has an account. The
+          // server answers identically for the same reason: anything else here is a way to
+          // find out who has an account.
+          finish(
+            "Check your email",
+            "If that address has a Capture Studio account, a link to choose a new password is on its way. It expires in 60 minutes. Nothing arrived? Check the spam folder, then try again in a minute."
+          );
+        } catch {
+          btn.disabled = false;
+          say(request, "Could not reach the server. Check your connection and try again.", true);
+        }
+      });
+
+      choose.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const password = choose.password.value;
+        if (password !== choose.confirm.value) {
+          say(choose, "Those two passwords are not the same.", true);
+          return;
+        }
+        const btn = choose.querySelector("button");
+        btn.disabled = true;
+        say(choose, "Saving…");
+        try {
+          const res = await fetch(API + "/auth/reset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, password }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            btn.disabled = false;
+            say(choose, data.error || "That did not work. Ask for a new link and try again.", true);
+            return;
+          }
+          finish(
+            "Password changed",
+            "You can log in with the new password from Settings → Account in the app. Anything that was already signed in to this account has been signed out."
+          );
+        } catch {
+          btn.disabled = false;
+          say(choose, "Could not reach the server. Check your connection and try again.", true);
+        }
+      });
+    </script>
+    <script src="/assets/site.js"></script>
+  </body>
+</html>

@@ -37,10 +37,25 @@ crons = ["0 3 * * *"]
 PUBLIC_R2_URL = "https://REPLACE_WITH_CUSTOM_DOMAIN"
 R2_BUCKET = "capture-studio-uploads"
 
+# Origin of the marketing site. Password reset emails link back to `<SITE_URL>/reset.html`,
+# so a wrong value here produces mail whose only link is broken.
+SITE_URL = "https://REPLACE_WITH_SITE_DOMAIN"
+
 # Secrets (set via `wrangler secret put <NAME>`, never committed):
 #   JWT_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
 #   PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID, PAYPAL_API_BASE,
-#   PAYPAL_PLAN_IDS, PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY
+#   PAYPAL_PLAN_IDS, PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY,
+#   RESEND_API_KEY, MAIL_FROM
+#
+# RESEND_API_KEY and MAIL_FROM are what password reset sends mail through. Both optional:
+# without them /auth/request-reset still answers normally and logs that it could not send,
+# because failing the request instead would tell an attacker which addresses are registered.
+# Nobody can recover an account until they are set, though.
+#
+# MAIL_FROM must be at a domain verified with the provider, e.g.
+#   Capture Studio <noreply@capturestudio.app>
+# Resend rather than MailChannels: the free MailChannels route out of Workers was withdrawn
+# in 2024, so every older guide describing "no API key needed" is out of date.
 #
 # PAYPAL_PLAN_IDS is a JSON object mapping "<tier>:<interval>" to a PayPal billing-plan id.
 # One plan has to exist in the PayPal dashboard for every price point in src/pricing.ts:

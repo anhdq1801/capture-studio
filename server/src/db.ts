@@ -1,4 +1,4 @@
-import type { Env, SubscriptionRow, UserRow } from "./types";
+import type { Env, PasswordResetRow, SubscriptionRow, UserRow } from "./types";
 
 export function newId(): string {
   return crypto.randomUUID();
@@ -27,6 +27,66 @@ export async function insertUser(
   )
     .bind(user.id, user.email, user.passwordHash, user.createdAt)
     .run();
+}
+
+// ---- Password reset ----
+
+/**
+ * Store a reset token's hash, retiring any the same user already has outstanding.
+ *
+ * Retiring the old ones matters: without it, every "I didn't get the email" retry leaves
+ * another live token behind, so the account stays openable by the oldest link anyone ever
+ * received for as long as it has not expired.
+ */
+export async function createPasswordReset(
+  env: Env,
+  reset: { tokenHash: string; userId: string; expiresAt: string; createdAt: string }
+): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL"
+    ).bind(reset.createdAt, reset.userId),
+    env.DB.prepare(
+      "INSERT INTO password_resets (token_hash, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, NULL, ?)"
+    ).bind(reset.tokenHash, reset.userId, reset.expiresAt, reset.createdAt),
+  ]);
+}
+
+export async function getPasswordReset(
+  env: Env,
+  tokenHash: string
+): Promise<PasswordResetRow | null> {
+  return env.DB.prepare("SELECT * FROM password_resets WHERE token_hash = ?")
+    .bind(tokenHash)
+    .first<PasswordResetRow>();
+}
+
+/** When the user last asked for a reset, used to refuse a flood of emails to one address. */
+export async function lastPasswordResetAt(env: Env, userId: string): Promise<string | null> {
+  const row = await env.DB.prepare(
+    "SELECT created_at FROM password_resets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1"
+  )
+    .bind(userId)
+    .first<{ created_at: string }>();
+  return row?.created_at ?? null;
+}
+
+/**
+ * Set the new password and spend the token, in one batch.
+ *
+ * `password_changed_at` is what stops sessions issued before the reset — the reason for
+ * resetting is often that somebody else has one.
+ */
+export async function applyPasswordReset(
+  env: Env,
+  args: { userId: string; tokenHash: string; passwordHash: string; at: string }
+): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?")
+      .bind(args.passwordHash, args.at, args.userId),
+    env.DB.prepare("UPDATE password_resets SET used_at = ? WHERE token_hash = ?")
+      .bind(args.at, args.tokenHash),
+  ]);
 }
 
 /**
