@@ -30,6 +30,20 @@ app.get("/", (c) => c.json({ ok: true, service: "capture-studio-api" }));
  */
 app.use("/pricing", cors({ origin: "*", allowMethods: ["GET", "OPTIONS"] }));
 
+/**
+ * Password reset is the other pair called from a browser, for the same reason: proving control
+ * of an inbox means following a link out of an email, which lands on the site rather than in
+ * the app. Without this the reset page fails in every browser while `curl` against the same
+ * routes keeps working, since CORS is enforced by the client and nowhere else.
+ *
+ * Open to any origin, like /pricing. There is nothing here for another site to steal: no
+ * cookies, no credentials, /request-reset answers identically whatever it is asked, and /reset
+ * needs the secret from the email. Narrowing it would only inconvenience whoever moves the
+ * site later.
+ */
+app.use("/auth/request-reset", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
+app.use("/auth/reset", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
+
 app.get("/pricing", (c) =>
   c.json({
     tiers: TIERS.map((t) => ({
