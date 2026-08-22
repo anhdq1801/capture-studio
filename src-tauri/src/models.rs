@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single item in the capture library (a screenshot or a screen recording).
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -151,6 +152,15 @@ pub struct AppSettings {
     /// still loads.
     #[serde(default = "default_ocr_languages")]
     pub ocr_languages: Vec<String>,
+    /// The global shortcut for each capture action, keyed by the ids in `settings::SHORTCUTS`
+    /// and written the way Tauri parses accelerators (`CommandOrControl+Shift+2`).
+    ///
+    /// A key that is present but empty means the user deliberately unbound that action; a key
+    /// that is missing entirely means they have never touched it and it keeps its shipped
+    /// default. Keeping those two apart is what lets a new action arrive in a later version
+    /// with its default intact, in a settings file written before it existed.
+    #[serde(default = "crate::settings::default_shortcuts")]
+    pub shortcuts: HashMap<String, String>,
 }
 
 fn default_ocr_languages() -> Vec<String> {

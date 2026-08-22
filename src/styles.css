@@ -1245,3 +1245,55 @@ input[readonly] {
     flex-basis: 100%;
   }
 }
+
+/* ---- Editable global shortcuts (Settings › General) ---- */
+.sc-list {
+  display: grid;
+  gap: 2px;
+}
+.sc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  padding: 5px 0;
+}
+.sc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Wide enough that swapping ⇧⌘2 for ⌃⌥Space doesn't shuffle the whole column. */
+.sc-key {
+  flex: none;
+  min-width: 96px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.sc-key:hover {
+  border-color: var(--border);
+}
+.sc-key.empty {
+  color: var(--text-faint);
+}
+.sc-key.armed {
+  color: var(--accent);
+  border-color: var(--accent);
+  /* The one row waiting for a keypress has to be obvious at a glance, since every other row
+     still looks clickable. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.sc-warn {
+  flex: none;
+  font-size: 11px;
+  color: var(--warn);
+}

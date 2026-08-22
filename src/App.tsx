@@ -29,6 +29,7 @@ import {
   snoozeLicenseNudge,
 } from "./lib/api";
 import { OverlayMode, openRegionOverlay, prewarmRegionOverlays } from "./lib/overlay";
+import { loadShortcuts } from "./lib/shortcuts";
 import { openStopBar, closeStopBar } from "./lib/stopbar";
 import { openScrollBar, closeScrollBar } from "./lib/scrollbar";
 import { hideRegionHint } from "./lib/regionhint";
@@ -108,6 +109,9 @@ export default function App() {
   useEffect(() => {
     reload();
     listMonitors().then(setMonitors).catch(() => {});
+    // The sidebar labels its buttons with these, so they are read once here rather than by
+    // each surface that prints one. Falls back to the shipped defaults on failure.
+    loadShortcuts().catch(() => {});
     getAccountStatus().then(setAccount).catch(() => {});
     // Checked once here so the sidebar can disable recording up front, instead of the user
     // discovering it two clicks deep inside the record dialog.

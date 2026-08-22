@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MonitorInfo } from "../lib/api";
-import { ACTIONS, shortcut } from "../lib/actions";
+import { ACTIONS } from "../lib/actions";
+import { ShortcutId, comboFor, formatAccelerator, useShortcuts } from "../lib/shortcuts";
 import { UiIcon, UiIconName } from "./Icons";
 import { View } from "../App";
 
@@ -58,6 +59,14 @@ export function Sidebar({
 
   const primaryId = monitors.find((m) => m.isPrimary)?.id ?? null;
   const capturing = busy === "capture";
+  // Read live, so rebinding one in Settings relabels these badges instead of leaving them
+  // advertising a combination that no longer does anything.
+  const shortcuts = useShortcuts();
+  const kbd = (id: ShortcutId) => {
+    const combo = comboFor(shortcuts, id);
+    // Nothing to show for an action the user has deliberately unbound.
+    return combo ? <kbd className="side-kbd">{formatAccelerator(combo)}</kbd> : null;
+  };
 
   // Every capture entry looks and behaves the same, including where its spinner appears —
   // previously only "Full screen" showed one, so the other modes looked inert while their
@@ -66,7 +75,7 @@ export function Sidebar({
     action,
     onClick,
   }: {
-    action: { label: string; icon: UiIconName; key?: string };
+    action: { label: string; icon: UiIconName; shortcut?: ShortcutId };
     onClick: () => void;
   }) => (
     <button className="side-btn" onClick={onClick} disabled={capturing}>
@@ -74,7 +83,7 @@ export function Sidebar({
         {capturing ? <i className="spin" /> : <UiIcon name={action.icon} />}
       </span>
       <span className="side-btn-label">{action.label}</span>
-      {action.key && <kbd className="side-kbd">{shortcut(action.key)}</kbd>}
+      {action.shortcut && kbd(action.shortcut)}
     </button>
   );
 
@@ -153,7 +162,7 @@ export function Sidebar({
           <span className="side-btn-label">
             {recording ? "Stop recording" : ACTIONS.record.label}
           </span>
-          {!recording && <kbd className="side-kbd">{shortcut(ACTIONS.record.key)}</kbd>}
+          {!recording && kbd(ACTIONS.record.shortcut)}
         </button>
         {ffmpegReady === false && (
           <div className="side-note">ffmpeg not found — recording is unavailable.</div>
@@ -184,7 +193,7 @@ export function Sidebar({
             <UiIcon name={ACTIONS.clipboard.icon} />
           </span>
           <span className="side-btn-label">{ACTIONS.clipboard.label}</span>
-          <kbd className="side-kbd">{shortcut(ACTIONS.clipboard.key)}</kbd>
+          {kbd(ACTIONS.clipboard.shortcut)}
         </button>
         <div className="side-note dim">
           Adds a picture you already have to the library, ready to annotate.

@@ -17,6 +17,7 @@ use models::MediaItem;
 use recorder::RecorderState;
 use scroll::ScrollState;
 use settings::SettingsState;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, IconMenuItem, Menu, PredefinedMenuItem};
@@ -167,13 +168,127 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
-/// Accelerator for a capture shortcut.
+/// Register every global shortcut from `shortcuts`, replacing whatever was registered before.
 ///
-/// `Cmd` is a macOS-only token — the global-shortcut plugin fails to parse it on Windows and
-/// the error was being swallowed, so every shortcut silently did nothing there while the UI
-/// still advertised them. `CommandOrControl` resolves to ⌘ on macOS and Ctrl elsewhere.
-fn accel(key: &str) -> String {
-    format!("CommandOrControl+Shift+{key}")
+/// Returns the ids the system would not hand over. A combination another app already holds
+/// cannot be registered, and that failure used to be discarded — so a shortcut the menu still
+/// advertised simply did nothing, with nothing anywhere to say why. It is reported instead, and
+/// the rest are still bound: one rejected combination must not cost the user the other six.
+///
+/// The list is not a guarantee, which is why Settings words its warning carefully. macOS hands
+/// a hot key to whoever asked first only among apps that ask the same way; one holding ⇧⌘4
+/// through an event tap shadows ours without this ever seeing an error.
+fn apply_shortcuts(app: &tauri::AppHandle, shortcuts: &HashMap<String, String>) -> Vec<String> {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let mut failed = Vec::new();
+    for (id, action, default_key) in settings::SHORTCUTS {
+        let combo = settings::combo_for(shortcuts, id, default_key);
+        // An entry the user cleared on purpose. Nothing to bind, and nothing wrong.
+        if combo.is_empty() {
+            continue;
+        }
+        let h = app.clone();
+        if let Err(e) = gs.on_shortcut(combo.as_str(), move |_app, _sc, event| {
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                dispatch(&h, action);
+            }
+        }) {
+            eprintln!("shortcut {combo} ({action}) could not be registered: {e}");
+            failed.push(id.to_string());
+        }
+    }
+    failed
+}
+
+/// Whether the tray menu should use the dark glyph set.
+fn is_dark(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.theme().ok())
+        .map(|t| t == tauri::Theme::Dark)
+        .unwrap_or(false)
+}
+
+/// Rebuild the tray menu against the given appearance, and the current autostart state and
+/// shortcuts.
+///
+/// All three are baked into the menu when it is built — the glyphs are plain bitmaps and the
+/// accelerators plain text — so changing any of them means building the whole thing again. A
+/// build that fails leaves the previous menu in place, which is the right outcome: a stale
+/// accelerator beside an item is a much smaller problem than no tray menu at all.
+///
+/// The appearance is the one argument rather than another lookup because the caller that knows
+/// it has changed is the `ThemeChanged` handler, which should not have to assume the window
+/// already reports the new value.
+fn rebuild_tray_menu(app: &tauri::AppHandle, dark: bool) {
+    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let shortcuts = app
+        .state::<SettingsState>()
+        .lock()
+        .map(|s| s.shortcuts.clone())
+        .unwrap_or_default();
+    if let (Ok(menu), Some(tray)) = (
+        build_tray_menu(app, dark, autostart_on, &shortcuts),
+        app.tray_by_id("main-tray"),
+    ) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// Release every global shortcut while Settings is waiting for the user to press a new one, and
+/// put them back afterwards.
+///
+/// A registered hot key is taken by the system before the focused app sees the keypress, so
+/// without this the only combinations that could be recorded are the ones not already bound:
+/// pressing ⇧⌘2 to move it somewhere else would fire a capture instead of being read.
+#[tauri::command]
+fn pause_shortcuts(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    paused: bool,
+) -> Result<(), String> {
+    if paused {
+        let _ = app.global_shortcut().unregister_all();
+        return Ok(());
+    }
+    let guard = state.lock().map_err(|e| e.to_string())?;
+    apply_shortcuts(&app, &guard.shortcuts);
+    Ok(())
+}
+
+/// Rebind the global shortcuts and persist them.
+///
+/// Returns the ids that could not be registered, so Settings can mark those rows rather than
+/// claiming a save that did not take effect. Two actions sharing a combination is rejected
+/// outright instead: whichever lost the race would look broken for no visible reason.
+#[tauri::command]
+fn set_shortcuts(
+    app: tauri::AppHandle,
+    state: tauri::State<SettingsState>,
+    shortcuts: HashMap<String, String>,
+) -> Result<Vec<String>, String> {
+    let mut seen = HashSet::new();
+    for (id, _, default_key) in settings::SHORTCUTS {
+        let combo = settings::combo_for(&shortcuts, id, default_key);
+        if !combo.is_empty() && !seen.insert(combo.clone()) {
+            return Err(format!("{combo} is already used by another action"));
+        }
+    }
+
+    // Written and registered under one lock, so this cannot interleave with the `pause_shortcuts`
+    // that Settings issues as it stops listening and end up re-registering the previous set on
+    // top of the new one. The menu is rebuilt after the lock is released — it reads the same
+    // state, and holding it across that call would deadlock.
+    let (updated, failed) = {
+        let mut guard = state.lock().map_err(|e| e.to_string())?;
+        guard.shortcuts = shortcuts;
+        let failed = apply_shortcuts(&app, &guard.shortcuts);
+        (guard.clone(), failed)
+    };
+    settings::save(&updated);
+    // So the menu stops advertising the combination the user just replaced.
+    rebuild_tray_menu(&app, is_dark(&app));
+    Ok(failed)
 }
 
 fn dispatch(app: &tauri::AppHandle, action: &str) {
@@ -204,6 +319,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     app: &M,
     dark: bool,
     autostart_on: bool,
+    shortcuts: &HashMap<String, String>,
 ) -> tauri::Result<Menu<R>> {
     // Every item carries a glyph. The menu is the app's primary surface — most captures start
     // here rather than in the window — and a column of identically shaped text is slow to scan
@@ -211,41 +327,48 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     let mi = |id: &str, label: &str, accel: Option<&str>, icon: &[u8]| {
         IconMenuItem::with_id(app, id, label, true, Some(Image::from_bytes(icon)?), accel)
     };
+    // What to print down the right-hand edge. Read from the same settings the shortcuts are
+    // registered from, so an item never promises a key combination that is no longer bound —
+    // and shows nothing at all for an action the user has deliberately unbound.
+    let sc = |id: &str, default_key: &str| {
+        let combo = settings::combo_for(shortcuts, id, default_key);
+        (!combo.is_empty()).then_some(combo)
+    };
     let show = mi("show", "Open Capture Studio", None, menu_icon!(dark, "app"))?;
     let region = mi(
         "capture-region",
         "Capture Area",
-        Some(&accel("2")),
+        sc("capture-region", "2").as_deref(),
         menu_icon!(dark, "area"),
     )?;
     let full = mi(
         "capture-full",
         "Capture Screen",
-        Some(&accel("1")),
+        sc("capture-full", "1").as_deref(),
         menu_icon!(dark, "screen"),
     )?;
     let window = mi(
         "capture-window",
         "Capture Window",
-        Some(&accel("3")),
+        sc("capture-window", "3").as_deref(),
         menu_icon!(dark, "window"),
     )?;
     let scroll = mi(
         "capture-scroll",
         "Scrolling Capture",
-        Some(&accel("4")),
+        sc("capture-scroll", "4").as_deref(),
         menu_icon!(dark, "scroll"),
     )?;
     let text = mi(
         "capture-text",
         "Capture Text (OCR)",
-        Some(&accel("6")),
+        sc("capture-text", "6").as_deref(),
         menu_icon!(dark, "text"),
     )?;
     let record = mi(
         "record",
         "Screen Recording",
-        Some(&accel("5")),
+        sc("record", "5").as_deref(),
         menu_icon!(dark, "record"),
     )?;
     let delayed = mi(
@@ -263,7 +386,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     let clipboard = mi(
         "clipboard",
         "Paste Image From Clipboard",
-        Some(&accel("V")),
+        sc("clipboard", "V").as_deref(),
         menu_icon!(dark, "clipboard"),
     )?;
     // Settings and Quit have no global binding, so showing an accelerator here would promise a
@@ -336,12 +459,19 @@ pub fn run() {
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             // The glyphs beside each item are plain bitmaps, so the set has to match the system
             // appearance; `is_dark` is re-read and the menu rebuilt whenever that changes.
-            let is_dark = app
-                .get_webview_window("main")
-                .and_then(|w| w.theme().ok())
-                .map(|t| t == tauri::Theme::Dark)
-                .unwrap_or(false);
-            let menu = build_tray_menu(app, is_dark, autostart_on)?;
+            let dark = is_dark(&handle);
+            let shortcuts = app
+                .state::<SettingsState>()
+                .lock()
+                .map(|s| s.shortcuts.clone())
+                .unwrap_or_default();
+            // A stored combination the menu cannot render must not take the tray down with it:
+            // `?` here would mean a single bad accelerator in settings.json leaves the app with
+            // no menu bar icon and no way to reach Settings to fix it.
+            let menu = build_tray_menu(app, dark, autostart_on, &shortcuts)
+                .or_else(|_| {
+                    build_tray_menu(app, dark, autostart_on, &settings::default_shortcuts())
+                })?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -384,22 +514,7 @@ pub fn run() {
                 .build(app)?;
 
             // ---- Global shortcuts ----
-            let gs = app.global_shortcut();
-            let bind = |combo: &str, action: &'static str| {
-                let h = handle.clone();
-                let _ = gs.on_shortcut(combo, move |_app, _sc, event| {
-                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        dispatch(&h, action);
-                    }
-                });
-            };
-            bind(&accel("1"), "capture-full");
-            bind(&accel("2"), "capture-region");
-            bind(&accel("3"), "capture-window");
-            bind(&accel("4"), "capture-scroll");
-            bind(&accel("5"), "record-toggle");
-            bind(&accel("6"), "capture-text");
-            bind(&accel("V"), "clipboard");
+            apply_shortcuts(&handle, &shortcuts);
 
             // ---- Close the main window to the tray instead of quitting ----
             if let Some(win) = app.get_webview_window("main") {
@@ -415,14 +530,7 @@ pub fn run() {
                     // Rebuilding the whole menu is the only way to change them — muda exposes no
                     // way to replace an item's image in place.
                     WindowEvent::ThemeChanged(theme) => {
-                        let dark = *theme == tauri::Theme::Dark;
-                        let on = themed.autolaunch().is_enabled().unwrap_or(false);
-                        if let (Ok(menu), Some(tray)) = (
-                            build_tray_menu(&themed, dark, on),
-                            themed.tray_by_id("main-tray"),
-                        ) {
-                            let _ = tray.set_menu(Some(menu));
-                        }
+                        rebuild_tray_menu(&themed, *theme == tauri::Theme::Dark)
                     }
                     _ => {}
                 });
@@ -440,6 +548,8 @@ pub fn run() {
             reveal_item,
             get_autostart,
             set_autostart,
+            set_shortcuts,
+            pause_shortcuts,
             capture::list_monitors,
             capture::list_windows,
             capture::capture_monitor,

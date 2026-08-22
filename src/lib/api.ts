@@ -95,6 +95,8 @@ export interface AppSettings {
   codec: string;
   /** BCP-47 tags in priority order, e.g. ["vi-VT", "en-US"]. */
   ocrLanguages: string[];
+  /** Accelerator per shortcut id, e.g. `{"capture-region": "CommandOrControl+Shift+2"}`. */
+  shortcuts: Record<string, string>;
 }
 
 export interface CodecOption {
@@ -317,6 +319,15 @@ export const ocrItem = (id: string) => invoke<OcrResult>("ocr_item", { id });
 export const getAppSettings = () => invoke<AppSettings>("get_app_settings");
 export const setAppSettings = (settings: AppSettings) =>
   invoke<AppSettings>("set_app_settings", { settings });
+/** Persist and rebind the global shortcuts. Resolves to the ids the system refused. */
+export const setShortcuts = (shortcuts: Record<string, string>) =>
+  invoke<string[]>("set_shortcuts", { shortcuts });
+/**
+ * Release the global shortcuts while Settings listens for a new key combination, so pressing
+ * one that is already bound is read rather than firing its capture.
+ */
+export const pauseShortcuts = (paused: boolean) =>
+  invoke<void>("pause_shortcuts", { paused });
 
 // ---- Account / Cloud ----
 export type PlanInterval = "monthly" | "annual";

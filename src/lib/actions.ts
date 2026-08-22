@@ -1,4 +1,5 @@
 import { UiIconName } from "../components/Icons";
+import { ShortcutId } from "./shortcuts";
 
 /**
  * One name per action, used by the sidebar, Settings and the record dialog.
@@ -9,39 +10,30 @@ import { UiIconName } from "../components/Icons";
  * canonical set and is mirrored here.
  */
 
-const isMac =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform ?? "");
-
-/**
- * Render a capture shortcut the way this platform writes it. The Rust side binds
- * `CommandOrControl+Shift+<key>`, which is ⇧⌘ on macOS and Ctrl+Shift elsewhere — showing
- * Mac glyphs to a Windows user describes keys that do not exist there.
- */
-export const shortcut = (key: string) => (isMac ? `⇧⌘${key}` : `Ctrl+Shift+${key}`);
-
 export interface ActionLabel {
   label: string;
   icon: UiIconName;
-  key?: string;
+  /** The id this action's global shortcut is stored under, for the actions that have one. */
+  shortcut?: ShortcutId;
 }
 
 export const ACTIONS = {
-  captureRegion: { label: "Capture Area", icon: "area", key: "2" },
-  captureFull: { label: "Capture Screen", icon: "screen", key: "1" },
-  captureWindow: { label: "Capture Window", icon: "window", key: "3" },
-  captureScroll: { label: "Scrolling Capture", icon: "scroll", key: "4" },
-  captureText: { label: "Capture Text (OCR)", icon: "text", key: "6" },
+  captureRegion: { label: "Capture Area", icon: "area", shortcut: "capture-region" },
+  captureFull: { label: "Capture Screen", icon: "screen", shortcut: "capture-full" },
+  captureWindow: { label: "Capture Window", icon: "window", shortcut: "capture-window" },
+  captureScroll: { label: "Scrolling Capture", icon: "scroll", shortcut: "capture-scroll" },
+  captureText: { label: "Capture Text (OCR)", icon: "text", shortcut: "capture-text" },
   captureDelayed: { label: "Delayed Screenshot (3s)", icon: "timer" },
-  record: { label: "Screen Recording", icon: "record", key: "5" },
+  record: { label: "Screen Recording", icon: "record", shortcut: "record" },
   openFile: { label: "Open an image file…", icon: "file" },
-  clipboard: { label: "Paste image from clipboard", icon: "clipboard", key: "V" },
+  clipboard: { label: "Paste image from clipboard", icon: "clipboard", shortcut: "clipboard" },
 } satisfies Record<string, ActionLabel>;
 
 /**
- * The shortcuts Settings lists, derived from the same table the buttons use. Ordered the way
- * the sidebar and tray present them, so the list reads as a map of the UI.
+ * The bindable actions in the order Settings lists them, which is the order the sidebar and
+ * tray present them in — so the list reads as a map of the UI rather than an alphabet.
  */
-export const SHORTCUT_LIST = (
+export const SHORTCUT_ROWS: { id: ShortcutId; label: string }[] = (
   [
     "captureRegion",
     "captureFull",
@@ -51,4 +43,4 @@ export const SHORTCUT_LIST = (
     "record",
     "clipboard",
   ] as const
-).map((k) => [ACTIONS[k].label, shortcut(ACTIONS[k].key)] as [string, string]);
+).map((k) => ({ id: ACTIONS[k].shortcut, label: ACTIONS[k].label }));

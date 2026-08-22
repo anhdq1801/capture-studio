@@ -37,7 +37,8 @@ import {
   createPayosPayment,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import { SHORTCUT_LIST } from "../lib/actions";
+import { SHORTCUT_ROWS } from "../lib/actions";
+import { ShortcutRecorder } from "./ShortcutRecorder";
 import { Toggle } from "./Modal";
 
 /**
@@ -420,17 +421,7 @@ export function Settings({
 
         <div className="field">
           <label>Global shortcuts</label>
-          <div className="meta-list" style={{ borderTop: "none", marginTop: 0 }}>
-            {SHORTCUT_LIST.map(([name, key]) => (
-              <div key={name} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>{name}</span>
-                <b style={{ fontVariantNumeric: "tabular-nums" }}>{key}</b>
-              </div>
-            ))}
-          </div>
-          <div className="hint">
-            Shortcuts work anywhere, even when the window is hidden in the menu bar.
-          </div>
+          <ShortcutRecorder rows={SHORTCUT_ROWS} toast={toast} />
         </div>
 
         <div className="field">
