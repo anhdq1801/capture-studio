@@ -61,6 +61,10 @@ export async function openScrollBar(
     resizable: false,
     shadow: false,
     focus: false,
+    // Same reason as the stop bar: the user is scrolling someone else's window when they reach
+    // for this, so our app is inactive and its first click would otherwise be eaten by the
+    // activation rather than pressing the button under the cursor.
+    acceptFirstMouse: true,
     title: "Scrolling capture",
     visibleOnAllWorkspaces: true,
   });

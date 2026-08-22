@@ -51,6 +51,20 @@ async function getOverlayWindow(monitor: MonitorInfo): Promise<WebviewWindow> {
       resizable: false,
       shadow: false,
       focus: false,
+      // Without this the whole tray-menu and global-shortcut path is broken.
+      //
+      // A capture started from the tray or a hotkey runs while some *other* app is frontmost.
+      // macOS gives an inactive application's window one free click to activate itself, and by
+      // default WKWebView answers `acceptsFirstMouse:` with NO — so that press is swallowed by
+      // the activation and never reaches the page. The crosshair then sees only the pointerup:
+      // no selection rectangle is drawn during the drag, and the gesture is reported as
+      // "no-gesture" and cancelled. Starting the same capture from the window works, because
+      // the app is already active and no activation click is needed.
+      //
+      // `setFocus()` at the end of `openRegionOverlay` is not a substitute: activating a
+      // background app is a request macOS is free to refuse, and one made while a status-item
+      // menu is closing usually is refused.
+      acceptFirstMouse: true,
       title: "Select region",
       // Without this, macOS still tends to treat a borderless always-on-top window covering the
       // whole screen as "fullscreen-like" and gives it a dedicated Space, animating a desktop

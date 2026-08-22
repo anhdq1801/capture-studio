@@ -19,6 +19,10 @@ export async function openStopBar(since: number): Promise<void> {
     resizable: false,
     shadow: false,
     focus: false,
+    // This bar exists to be clicked while another app is frontmost — that is the whole point of
+    // recording. An inactive app's window swallows its first click to activate itself unless the
+    // webview accepts it, which would cost every stop a second click.
+    acceptFirstMouse: true,
     center: true,
     title: "Recording",
   });
