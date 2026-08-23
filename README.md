@@ -114,6 +114,11 @@ npm run tauri dev      # run it
 npm run tauri build    # produce a distributable
 ```
 
+Everything except cloud upload works straight from a clone. Cloud upload talks to a Cloudflare
+Worker whose URL is a placeholder in `src-tauri/src/cloud.rs` — a build from source has no
+backend to reach, so that one feature will not work until you deploy your own (`server/`) and
+point `API_BASE` at it. Nothing else needs an account or a network.
+
 ### macOS
 
 Xcode Command Line Tools, which you almost certainly already have:
@@ -217,3 +222,13 @@ See [`master-context.md`](master-context.md) for full status. Outstanding:
   Gatekeeper detour.
 - Cloud upload is code-complete but the backend (`server/`) still needs deploying and its
   Cloudflare / PayPal / PayOS accounts configuring.
+
+---
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE). Use it, change it, ship it.
+
+The Windows target especially: there is no Windows binary to download, so building it yourself
+is the only way to run it there. If you get it working, a note about what you had to fix would
+be welcome.

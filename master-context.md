@@ -2,7 +2,6 @@
 
 > Read this first if you are an AI/editor picking up this project. It is the single source of
 > truth for architecture, conventions, what exists, and what to build next.
-> Location on disk: `/Volumes/DATA/OneShot/capture-studio`
 
 ---
 
