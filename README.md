@@ -125,9 +125,16 @@ xcode-select --install
 `npm run tauri build` produces `.app` and `.dmg` under
 `src-tauri/target/release/bundle/`, built for whichever architecture the machine is.
 
-To sign with your own certificate, change `bundle.macOS.signingIdentity` in
-`src-tauri/tauri.conf.json`; to notarise, set `APPLE_ID`, `APPLE_PASSWORD` (an app-specific
-password) and `APPLE_TEAM_ID` before building and Tauri handles the rest.
+Signing is read from the environment rather than committed, so a clone builds on any Mac
+without needing somebody else's certificate:
+
+```bash
+export APPLE_SIGNING_IDENTITY="<your certificate's SHA-1, from: security find-identity -v -p codesigning>"
+```
+
+Without it the build still succeeds, unsigned — fine for running it yourself, not for handing
+to anyone else. To notarise as well, set `APPLE_ID`, `APPLE_PASSWORD` (an app-specific
+password) and `APPLE_TEAM_ID` before building, and Tauri handles the rest.
 
 ### Windows
 

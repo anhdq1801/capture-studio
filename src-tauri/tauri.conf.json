@@ -25,7 +25,10 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["$PICTURE/CaptureStudio/**", "$HOME/CaptureStudio/**"],
+          "allow": [
+            "$PICTURE/CaptureStudio/**",
+            "$HOME/CaptureStudio/**"
+          ],
           "requireLiteralLeadingDot": false
         }
       }
@@ -34,9 +37,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "macOS": {
-      "signingIdentity": "956E54E791E6988C843920401428DBB6B4F14F03"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
