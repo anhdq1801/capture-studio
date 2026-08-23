@@ -367,6 +367,135 @@ h3 {
   font-size: 16px;
 }
 
+/* ---- Product shots ----
+ * Framed rather than bled to the edge: these are pictures *of* a screen, and without a border
+ * the app's own chrome reads as the page's chrome. The frame is the same one the app draws
+ * around a selection, which is the whole visual idea of the site. */
+.shots {
+  display: grid;
+  gap: 14px;
+}
+
+.shot {
+  margin: 0;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  /* Stands in for the picture while the asset is a placeholder, and stops a slow load from
+     collapsing the layout underneath it. */
+  background: var(--sheet);
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.shot figcaption {
+  color: var(--faint);
+  font-size: 14px;
+  margin-top: 10px;
+  max-width: 52ch;
+}
+
+.shot-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.shot-row .shot img {
+  aspect-ratio: 4 / 3;
+}
+
+.shot-row figcaption {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* ---- FAQ ----
+ * Native <details>, so it works with the page's JavaScript disabled and answers stay
+ * findable by the browser's own in-page search. */
+.faq {
+  border-top: 1px solid var(--line);
+}
+
+.faq details {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq summary {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  padding: 18px 34px 18px 0;
+  cursor: pointer;
+  position: relative;
+  list-style: none;
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A plus that becomes a minus, drawn rather than typed so it lines up at any font size. */
+.faq summary::before,
+.faq summary::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  background: var(--faint);
+  transition: transform 0.18s ease;
+}
+
+.faq summary::before {
+  width: 13px;
+  height: 1.5px;
+  transform: translateY(-50%);
+}
+
+.faq summary::after {
+  width: 1.5px;
+  height: 13px;
+  right: 9.75px;
+  transform: translateY(-50%);
+}
+
+.faq details[open] summary::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.faq summary:hover {
+  color: var(--beam-deep);
+}
+
+.faq details p {
+  color: var(--mute);
+  max-width: 64ch;
+  margin: 0 0 20px;
+  font-size: 16px;
+}
+
+.faq code {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faq summary::before,
+  .faq summary::after {
+    transition: none;
+  }
+}
+
 /* ---- Pricing ---- */
 .tiers {
   display: grid;
@@ -578,4 +707,59 @@ h3 {
     gap: 14px;
     font-size: 14px;
   }
+}
+
+/* ---------- Password reset ---------- */
+/* The one page on the site with a form on it. Narrow, because a single column of two fields
+   sprawls badly across a full-width band. */
+.auth-band {
+  max-width: 460px;
+}
+
+.auth-band .field {
+  display: block;
+  margin: 18px 0;
+}
+
+.auth-band .field > span {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mute);
+  margin-bottom: 7px;
+}
+
+.auth-band input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.auth-band input:focus {
+  outline: none;
+  border-color: var(--beam);
+  box-shadow: 0 0 0 3px var(--beam-soft);
+}
+
+.auth-band .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Says what happened, under the button that caused it. */
+.form-msg {
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--mute);
+  min-height: 1.4em;
+}
+
+.form-msg.bad {
+  color: var(--danger);
 }

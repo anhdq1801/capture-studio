@@ -26,6 +26,8 @@
           Capture Studio
         </a>
         <nav class="nav">
+          <a href="#features">Features</a>
+          <a href="#faq">FAQ</a>
           <a href="/pricing.html">Pricing</a>
           <a href="/privacy.html">Privacy</a>
           <a href="/terms.html">Terms</a>
@@ -60,7 +62,54 @@
         </div>
       </section>
 
-      <section class="band">
+      <!-- A tool for making pictures has to show its own. Everything below the hero was words
+           until this section existed, which is a strange thing for a screenshot app to ask
+           anyone to buy. Drop real captures in — see the placeholder table in README.md. -->
+      <section class="band shots">
+        <figure class="shot">
+          <img
+            src="[[SHOT_EDITOR]]"
+            alt="The Capture Studio annotation editor open on a fresh screenshot, with an arrow, a numbered step and a blurred region"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption>
+            The editor opens on every capture, before anything is saved. Mark it up, blur what
+            should not leave your machine, or throw it away.
+          </figcaption>
+        </figure>
+        <div class="shot-row">
+          <figure class="shot">
+            <img
+              src="[[SHOT_OVERLAY]]"
+              alt="The selection crosshair over a desktop, showing the live pixel dimensions of the region being dragged"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Drag an area, or click a window.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img
+              src="[[SHOT_OCR]]"
+              alt="Text recognition reading the words out of a region of the screen"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Lift the text straight off the screen.</figcaption>
+          </figure>
+          <figure class="shot">
+            <img
+              src="[[SHOT_LIBRARY]]"
+              alt="The Capture Studio library showing a grid of past screenshots and recordings"
+              loading="lazy"
+              decoding="async"
+            />
+            <figcaption>Everything you kept, on your own disk.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="band" id="features">
         <h2>Six ways to take a picture of a screen</h2>
         <p>
           Each one has a shortcut, so the app stays out of your way. Press the keys, drag if
@@ -177,6 +226,94 @@
           Anything you upload is reachable by anyone holding the link. Files stay for as long
           as the plan is active, and for <span data-grace-days>30</span> days after it ends
           before they are deleted. Captures on your own computer are never touched.
+        </div>
+      </section>
+
+      <!-- Written from the source rather than from what would sell well. The permission
+           questions are first because they are what actually goes wrong on a Mac, and a
+           support page that opens with anything else is answering the wrong thing. -->
+      <section class="band" id="faq">
+        <h2>Questions people actually ask</h2>
+
+        <div class="faq">
+          <details>
+            <summary>Do I have to pay?</summary>
+            <p>
+              Not to capture anything. Every screenshot mode, the annotation editor, text
+              recognition, screen recording and the image optimizer work with no account and no
+              network connection. Paying adds one thing: uploading a capture and getting a link
+              to it.
+            </p>
+          </details>
+
+          <details>
+            <summary>Why does macOS ask for Screen Recording permission?</summary>
+            <p>
+              Because taking a picture of the screen is exactly what that permission controls —
+              macOS makes no distinction between a screenshot and a recording. Grant it in
+              <strong>System Settings → Privacy &amp; Security → Screen Recording</strong>, then
+              quit and reopen Capture Studio. The relaunch matters: macOS answers the permission
+              question once per app launch and caches it.
+            </p>
+          </details>
+
+          <details>
+            <summary>I granted it, but my captures come back showing only the wallpaper.</summary>
+            <p>
+              That is a stale permission entry, and it happens after an update: the toggle still
+              reads as on while the system treats it as off. Turning it off and on again does not
+              clear it. Select Capture Studio in the Screen Recording list, remove it with the
+              <strong>−</strong> button, then reopen the app and grant the permission again when
+              it asks.
+            </p>
+          </details>
+
+          <details>
+            <summary>Do I need ffmpeg?</summary>
+            <p>
+              Only for screen recording. Screenshots, annotation, text recognition and optimizing
+              do not touch it. If you already have ffmpeg the app finds it on its own; if not,
+              <code>brew install ffmpeg</code> is the shortest route.
+            </p>
+          </details>
+
+          <details>
+            <summary>Where do my captures go?</summary>
+            <p>
+              Into <code>~/Pictures/CaptureStudio</code>, as ordinary PNG and MP4 files you can
+              open with anything. Settings shows you the folder and opens it in Finder. There is
+              no proprietary library format to be locked into — deleting the app leaves your
+              captures exactly where they were.
+            </p>
+          </details>
+
+          <details>
+            <summary>Does the app send anything anywhere?</summary>
+            <p>
+              Only when you press upload. There is no analytics, no telemetry and no licence
+              check that phones home — outside of the cloud features the app makes no network
+              requests at all. Text recognition runs on your Mac, not on a server.
+            </p>
+          </details>
+
+          <details>
+            <summary>What happens to my uploads if I stop paying?</summary>
+            <p>
+              Existing links keep working for <span data-grace-days>30</span> days after the plan
+              ends, so nothing you have already shared breaks the moment a card expires. After
+              that the uploaded copies are deleted. The originals on your own disk are never
+              touched.
+            </p>
+          </details>
+
+          <details>
+            <summary>Which languages can it read?</summary>
+            <p>
+              Text recognition uses the engine built into macOS, so the list depends on your
+              macOS version rather than on us. Capture Studio shows you the ones your system
+              actually supports and lets you pick which to use in Settings.
+            </p>
+          </details>
         </div>
       </section>
     </div>
