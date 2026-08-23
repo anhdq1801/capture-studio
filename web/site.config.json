@@ -5,7 +5,7 @@
   "SUPPORT_RESPONSE_DAYS": "",
   "JURISDICTION": "",
   "EFFECTIVE_DATE": "",
-  "PAYMENT_PROVIDER": "",
+  "PAYMENT_PROVIDER": "PayPal and PayOS",
   "GRACE_DAYS": "30",
   "REFUND_WINDOW_DAYS": "",
   "API_BASE_URL": "",
