@@ -14,12 +14,16 @@ A **cross-platform (macOS + Windows) desktop app** for:
 - **Image size optimization** — re-encode to WebP/JPEG/PNG with quality + max-width, before/after comparison.
 - **Menu-bar app** — tray icon with quick actions and **global keyboard shortcuts**, close-to-tray.
 - **Upload to Cloud (opt-in, paid)** — per-item, uploads to Cloudflare R2 via a presigned URL and
-  returns a public shareable link. See §11.
+  returns a public shareable link. See §11. **Built but switched off** — see below.
 
-Capture, annotation, recording, and optimization are fully deterministic and offline by default —
-no network calls, no telemetry. The one exception is the explicit, per-item "Upload to Cloud"
-action (§11), which requires an account and an active paid plan and is the only thing in this app
-that talks to the network.
+Capture, annotation, recording, and optimization are fully deterministic and offline — no network
+calls, no telemetry. The only code that talks to the network is the explicit, per-item "Upload to
+Cloud" action (§11), and shipped builds do not expose it: `COMMERCE_ENABLED` in
+`src/lib/features.ts` is `false`, which hides the cloud button in `DetailModal` and
+`AnnotationEditor`, the Account tab and licence-key field in `Settings`, and the licence nudge bar
+in `App.tsx`. So the app as distributed makes no network calls at all. The flag exists because the
+backend is undeployed and nothing is for sale; flipping it back on is a one-line change once
+§11's "Not yet done" list is finished.
 
 ---
 
@@ -303,9 +307,10 @@ Why freeze-frame: capturing live would also capture the overlay veil. CSS→phys
   timer + stop button window takes over; ⇧⌘5 is now a true start/stop toggle (recording state
   lives in `App.tsx`, see §6).
 - **Cloud upload (opt-in, paid)** — login/signup, PayPal + PayOS monthly/annual subscriptions with
-  storage top-ups, presigned R2 upload with a copy-link UX. See §11. Code-complete; **the Worker
-  backend still needs to be deployed and its accounts configured** before this works end-to-end
-  (see server/README.md and the "Not yet done" list in §11).
+  storage top-ups, presigned R2 upload with a copy-link UX. See §11. Code-complete but **switched
+  off in shipped builds** (`COMMERCE_ENABLED = false`, `src/lib/features.ts`): the Worker backend
+  is not deployed and there is no paid plan (see server/README.md and the "Not yet done" list in
+  §11).
 
 ### Known limitations ⚠️ (good next tasks)
 1. **Annotation shapes can't be selected/moved/deleted individually** — only global Undo/Clear. Add
@@ -323,6 +328,10 @@ Why freeze-frame: capturing live would also capture the overlay veil. CSS→phys
 9. **Cloud upload backend is not deployed** — `API_BASE` in `src-tauri/src/cloud.rs` is a
    placeholder (`capture-studio-api.YOUR_SUBDOMAIN.workers.dev`) until `server/` is deployed and
    its Cloudflare/PayPal/PayOS accounts are set up (see server/README.md §"One-time setup").
+   Because of that the whole surface is gated behind `COMMERCE_ENABLED` in `src/lib/features.ts`,
+   along with `BUY_URL` (still `example.com`) and the undeployed `web/` site the password-reset
+   link points at. Turning it on means: deploy `server/`, set `API_BASE`, deploy `web/` with a
+   filled `site.config.json`, set `BUY_URL`, then flip the flag.
 10. **Capture Area can't include Capture Studio's own window** — every mode except the window
     picker hides the app first (`openOverlay` in `App.tsx`), because a WKWebView cropped out of a
     whole-monitor grab comes back as a black rectangle. Capturing the app itself works today only

@@ -13,6 +13,7 @@ import {
 import { formatBytes, formatDuration } from "../lib/format";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useEscapeKey } from "./Modal";
+import { COMMERCE_ENABLED } from "../lib/features";
 
 interface Props {
   item: MediaItem;
@@ -198,11 +199,13 @@ export function DetailModal({
                 <button className="btn" onClick={() => revealItem(item.id)}>
                   Reveal in {navigatorLabel()}
                 </button>
+                {/* An item that already has a link keeps Copy link whatever the build ships;
+                    offering a *new* upload depends on a backend this build has none of. */}
                 {item.cloudUrl ? (
                   <button className="btn" onClick={copyLink}>
                     Copy link
                   </button>
-                ) : (
+                ) : COMMERCE_ENABLED ? (
                   <button className="btn" onClick={upload} disabled={uploading}>
                     {uploading ? (
                       <i className="spin" />
@@ -212,7 +215,7 @@ export function DetailModal({
                       "☁️ Upload to Cloud (Subscribe)"
                     )}
                   </button>
-                )}
+                ) : null}
                 <button className="btn danger" onClick={remove}>
                   🗑 Delete
                 </button>

@@ -12,6 +12,7 @@ import {
   uploadItem,
 } from "../lib/api";
 import { EditIcon, IconName } from "./EditIcons";
+import { COMMERCE_ENABLED } from "../lib/features";
 
 type Tool =
   | "select"
@@ -632,17 +633,19 @@ export function AnnotationEditor({
               onClick={save}
               primary
             />
-            <TB
-              icon="cloud"
-              label={
-                uploading
-                  ? "Uploading…"
-                  : subscriptionActive
-                  ? "Upload to Cloud"
-                  : "Upload to Cloud (Subscribe)"
-              }
-              onClick={upload}
-            />
+            {COMMERCE_ENABLED && (
+              <TB
+                icon="cloud"
+                label={
+                  uploading
+                    ? "Uploading…"
+                    : subscriptionActive
+                    ? "Upload to Cloud"
+                    : "Upload to Cloud (Subscribe)"
+                }
+                onClick={upload}
+              />
+            )}
             <TB
               icon="close"
               label={item.draft ? "Close without saving" : "Close"}

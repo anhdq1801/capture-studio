@@ -68,8 +68,9 @@ finds ffmpeg on its own — Homebrew, MacPorts or `PATH`, no configuration.
 - **Import** — an existing image file, or whatever is on the clipboard.
 - **Menu-bar app** — closing the window hides it to the tray rather than quitting. Optional
   launch at startup.
-- **Upload to Cloud (optional, paid)** — the one feature that touches the network. See
-  [Cloud upload](#cloud-upload-optional).
+Nothing here touches the network. There is no account, no telemetry and no licence key: every
+feature above is free, works offline, and keeps your captures on your own disk. See
+[Cloud upload](#cloud-upload) for the part that is written but not shipped.
 
 ---
 
@@ -114,10 +115,7 @@ npm run tauri dev      # run it
 npm run tauri build    # produce a distributable
 ```
 
-Everything except cloud upload works straight from a clone. Cloud upload talks to a Cloudflare
-Worker whose URL is a placeholder in `src-tauri/src/cloud.rs` — a build from source has no
-backend to reach, so that one feature will not work until you deploy your own (`server/`) and
-point `API_BASE` at it. Nothing else needs an account or a network.
+Everything works straight from a clone — no keys, no accounts, no services to sign up for.
 
 ### macOS
 
@@ -199,16 +197,17 @@ Captures live in `~/Pictures/CaptureStudio/`, indexed by `library.json`, with pr
 
 ---
 
-## Cloud upload (optional)
+## Cloud upload
 
-Capture, annotation, recording and optimisation are free and fully offline — no account needed.
-If you want a shareable link for an item, log in from **Settings › Account & Cloud Upload** and
-subscribe (PayPal for card/international, PayOS for Vietnamese domestic payment); each plan
-includes 3GB of storage with paid top-ups beyond that.
+**Not in this build.** Capture Studio is a local tool: captures live in a folder on your Mac and
+go no further.
 
-See [`server/README.md`](server/README.md) for deploying the backend (Cloudflare Workers + D1 +
-R2). It must be deployed and `API_BASE` in `src-tauri/src/cloud.rs` updated before this feature
-works.
+The repository does contain a complete cloud-upload feature — a Cloudflare Workers backend
+(`server/`) for accounts, subscriptions and shareable links. It is switched off at
+`src/lib/features.ts` (`COMMERCE_ENABLED = false`) because the backend is not deployed and the
+service is not for sale, and shipping a Log in button that cannot reach a server is worse than
+not showing one. If you want it, deploy your own — see [`server/README.md`](server/README.md)
+— then point `API_BASE` in `src-tauri/src/cloud.rs` at it and flip the flag.
 
 ---
 
@@ -220,8 +219,8 @@ See [`master-context.md`](master-context.md) for full status. Outstanding:
 - Bundling ffmpeg so recording works without a separate install.
 - A universal (Intel + Apple Silicon) build, and notarisation, so the `.dmg` opens without the
   Gatekeeper detour.
-- Cloud upload is code-complete but the backend (`server/`) still needs deploying and its
-  Cloudflare / PayPal / PayOS accounts configuring.
+- Cloud upload is code-complete but switched off: the backend (`server/`) is not deployed and
+  there is no paid plan. See [Cloud upload](#cloud-upload).
 
 ---
 

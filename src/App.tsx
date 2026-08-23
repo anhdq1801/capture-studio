@@ -31,6 +31,7 @@ import {
 import { OverlayMode, openRegionOverlay, prewarmRegionOverlays } from "./lib/overlay";
 import { loadShortcuts } from "./lib/shortcuts";
 import { BUY_URL } from "./lib/links";
+import { COMMERCE_ENABLED } from "./lib/features";
 import { openEditorWindow } from "./lib/editorwindow";
 import { openStopBar, closeStopBar } from "./lib/stopbar";
 import { openScrollBar, closeScrollBar } from "./lib/scrollbar";
@@ -749,7 +750,7 @@ export default function App() {
       <div className="main">
         {/* Above the view, below the title bar. Never rendered over a capture: the overlay is
             a separate window and the annotation editor replaces this tree entirely. */}
-        {license?.shouldNudge && (
+        {COMMERCE_ENABLED && license?.shouldNudge && (
           <LicenseBar
             status={license}
             onBuy={() => {

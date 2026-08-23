@@ -40,6 +40,7 @@ import { formatBytes } from "../lib/format";
 import { SHORTCUT_ROWS } from "../lib/actions";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { Toggle } from "./Modal";
+import { COMMERCE_ENABLED } from "../lib/features";
 
 /**
  * Settings used to be one long scroll. Splitting it means the thing you came to change is on
@@ -290,7 +291,7 @@ export function Settings({
         <h2>Settings</h2>
         <div className="spacer" />
         <div className="seg" role="tablist" aria-label="Settings sections">
-          {TABS.map((t) => (
+          {TABS.filter((t) => COMMERCE_ENABLED || t.id !== "account").map((t) => (
             <button
               key={t.id}
               role="tab"
@@ -347,6 +348,9 @@ export function Settings({
           </div>
         </div>
 
+        {/* Nothing is on sale in this build, so there is no key to paste and no reminder to
+            turn off — the app is simply free. See lib/features.ts. */}
+        {COMMERCE_ENABLED && (
         <div className="field">
           <label>Licence</label>
           {license?.licensed ? (
@@ -397,6 +401,7 @@ export function Settings({
             </>
           )}
         </div>
+        )}
 
         <div className="field">
           <label>Library folder</label>
@@ -560,7 +565,7 @@ export function Settings({
           </>
         )}
 
-        {tab === "account" && (
+        {COMMERCE_ENABLED && tab === "account" && (
         <div className="field">
           <label>Account &amp; Cloud Upload</label>
           {!account ? (
