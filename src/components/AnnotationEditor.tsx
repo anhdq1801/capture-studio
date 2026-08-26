@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   MediaItem,
   deleteItem,
+  imageMimeFor,
   itemPath,
   keepItem,
   saveAnnotated,
@@ -131,7 +132,7 @@ export function AnnotationEditor({
       try {
         const p = await itemPath(item.id);
         const bytes = await readFile(p);
-        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const blob = new Blob([new Uint8Array(bytes)], { type: imageMimeFor(p) });
         const bmp = await createImageBitmap(blob);
         // Closing on a late arrival matters: without it an editor closed mid-load leaks its
         // whole decoded bitmap, with nothing left holding a reference to free it.

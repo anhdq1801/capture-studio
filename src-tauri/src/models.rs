@@ -161,10 +161,24 @@ pub struct AppSettings {
     /// with its default intact, in a settings file written before it existed.
     #[serde(default = "crate::settings::default_shortcuts")]
     pub shortcuts: HashMap<String, String>,
+    /// `"png"` | `"jpg"` — the file type new captures are written as.
+    ///
+    /// Only ever consulted when a capture is first written. Items already in the library keep
+    /// the extension they were saved under, so changing this cannot invalidate the paths of
+    /// files the user has already shared, linked or opened elsewhere.
+    #[serde(default = "default_image_format")]
+    pub image_format: String,
 }
 
 fn default_ocr_languages() -> Vec<String> {
     vec!["en-US".into()]
+}
+
+/// PNG by default: it is lossless, and a screenshot's first job is to be an exact record of
+/// what was on screen. JPEG is offered for the people whose captures are headed somewhere with
+/// an upload limit, as a deliberate trade rather than a silent one.
+fn default_image_format() -> String {
+    "png".into()
 }
 
 /// One recognised line of text.

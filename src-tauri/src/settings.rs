@@ -80,6 +80,7 @@ impl Default for AppSettings {
             // works without touching Settings at all.
             ocr_languages: vec!["vi-VT".into(), "en-US".into()],
             shortcuts: default_shortcuts(),
+            image_format: "png".into(),
         }
     }
 }
@@ -110,3 +111,4 @@ pub fn set_app_settings(
     *guard = settings.clone();
     Ok(settings)
 }
+

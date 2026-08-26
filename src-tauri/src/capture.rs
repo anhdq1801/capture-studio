@@ -1,5 +1,6 @@
 use crate::library::{file_size, LibraryState};
 use crate::models::{MediaItem, MonitorInfo, WindowInfo};
+use crate::settings::SettingsState;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::imageops;
 use serde::Serialize;
@@ -71,14 +72,21 @@ pub fn set_clipboard_text(text: String) -> Result<(), String> {
 
 /// Import an existing image file from disk into the library.
 #[tauri::command]
-pub fn import_file(state: State<LibraryState>, path: String) -> Result<MediaItem, String> {
+pub fn import_file(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+    path: String,
+) -> Result<MediaItem, String> {
     let img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
-    save_screenshot(&state, img)
+    save_screenshot(&state, &settings, img)
 }
 
 /// Grab an image currently on the system clipboard and add it to the library.
 #[tauri::command]
-pub fn import_from_clipboard(state: State<LibraryState>) -> Result<MediaItem, String> {
+pub fn import_from_clipboard(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+) -> Result<MediaItem, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let data = clipboard
         .get_image()
@@ -89,12 +97,16 @@ pub fn import_from_clipboard(state: State<LibraryState>) -> Result<MediaItem, St
         data.bytes.into_owned(),
     )
     .ok_or_else(|| "Invalid clipboard image".to_string())?;
-    save_screenshot(&state, img)
+    save_screenshot(&state, &settings, img)
 }
 
 /// Persist a PNG (base64 data-URL body) as a new screenshot item.
 #[tauri::command]
-pub fn import_png(state: State<LibraryState>, png_base64: String) -> Result<MediaItem, String> {
+pub fn import_png(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+    png_base64: String,
+) -> Result<MediaItem, String> {
     let raw = png_base64
         .split_once(',')
         .map(|(_, b)| b)
@@ -103,7 +115,7 @@ pub fn import_png(state: State<LibraryState>, png_base64: String) -> Result<Medi
     let img = image::load(Cursor::new(&bytes), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?
         .to_rgba8();
-    save_screenshot(&state, img)
+    save_screenshot(&state, &settings, img)
 }
 
 fn now_stamp() -> (String, String) {
@@ -242,14 +254,18 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
 
 /// Capture a single window by the id reported from `list_windows`.
 #[tauri::command]
-pub fn capture_window(state: State<LibraryState>, window_id: u32) -> Result<MediaItem, String> {
+pub fn capture_window(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+    window_id: u32,
+) -> Result<MediaItem, String> {
     let windows = Window::all().map_err(|e| e.to_string())?;
     let target = windows
         .into_iter()
         .find(|w| w.id().map(|id| id == window_id).unwrap_or(false))
         .ok_or_else(|| "That window is no longer open".to_string())?;
     let img = target.capture_image().map_err(|e| e.to_string())?;
-    save_draft(&state, img)
+    save_draft(&state, &settings, img)
 }
 
 fn pick_monitor(monitor_id: Option<u32>) -> Result<Monitor, String> {
@@ -270,31 +286,105 @@ fn pick_monitor(monitor_id: Option<u32>) -> Result<Monitor, String> {
     monitors.into_iter().next().ok_or_else(|| "No monitor found".into())
 }
 
+/// JPEG quality for saved captures.
+///
+/// Screenshots are the worst case for JPEG: flat colour and small text, where ringing shows up
+/// around glyph edges long before it would on a photograph. 92 keeps those artefacts invisible
+/// at 1:1 while still cutting a typical capture to a fraction of its PNG size.
+///
+/// Fixed rather than exposed as a slider. The place to trade quality for bytes is the image
+/// optimiser, which already has one and can be re-run against the saved file; a capture is
+/// written once, and a quality setting that is too low is discovered only after the original
+/// pixels are gone.
+const JPEG_QUALITY: u8 = 92;
+
+/// Which extension `format` means, ignoring anything unrecognised.
+///
+/// A settings file is a text file a user can edit, and an unknown value there must not cost
+/// them the capture they just took — so it falls back to the lossless default rather than
+/// erroring.
+fn extension_for(format: &str) -> &'static str {
+    if format.eq_ignore_ascii_case("jpg") || format.eq_ignore_ascii_case("jpeg") {
+        "jpg"
+    } else {
+        "png"
+    }
+}
+
+/// Encode a capture for writing to disk in the user's chosen format.
+///
+/// JPEG has no alpha channel and the `image` crate refuses RGBA input rather than guessing what
+/// to do with it. Captures really do arrive with transparency — a window grab keeps the rounded
+/// corners cut out — so the pixels are flattened first. Onto white, because a transparent corner
+/// is a hole in a screenshot: white reads as paper, black reads as a rendering fault.
+fn encode_image(img: &image::RgbaImage, ext: &str) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    if ext == "jpg" {
+        let mut rgb = image::RgbImage::new(img.width(), img.height());
+        for (x, y, px) in img.enumerate_pixels() {
+            let a = px[3] as u32;
+            // Straight alpha over white, rounded rather than truncated so a fully opaque pixel
+            // survives the round trip unchanged.
+            let over = |c: u8| ((c as u32 * a + 255 * (255 - a) + 127) / 255) as u8;
+            rgb.put_pixel(x, y, image::Rgb([over(px[0]), over(px[1]), over(px[2])]));
+        }
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY)
+            .encode_image(&image::DynamicImage::ImageRgb8(rgb))
+            .map_err(|e| e.to_string())?;
+    } else {
+        image::DynamicImage::ImageRgba8(img.clone())
+            .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(buf)
+}
+
+/// The format new captures are saved in. Read and released before the library lock is taken,
+/// so the two are never held at once.
+fn chosen_extension(settings: &State<SettingsState>) -> &'static str {
+    let format = settings
+        .lock()
+        .map(|s| s.image_format.clone())
+        .unwrap_or_else(|_| "png".into());
+    extension_for(&format)
+}
+
 fn save_screenshot(
     state: &State<LibraryState>,
+    settings: &State<SettingsState>,
     img: image::RgbaImage,
 ) -> Result<MediaItem, String> {
-    save_image(state, img, false)
+    save_image(state, settings, img, false)
 }
 
 /// Same, but marked as a draft: written to disk so the editor can open it, yet kept out of
 /// the library until the user actually saves it.
-fn save_draft(state: &State<LibraryState>, img: image::RgbaImage) -> Result<MediaItem, String> {
-    save_image(state, img, true)
+fn save_draft(
+    state: &State<LibraryState>,
+    settings: &State<SettingsState>,
+    img: image::RgbaImage,
+) -> Result<MediaItem, String> {
+    save_image(state, settings, img, true)
 }
 
 fn save_image(
     state: &State<LibraryState>,
+    settings: &State<SettingsState>,
     img: image::RgbaImage,
     draft: bool,
 ) -> Result<MediaItem, String> {
     let (id, created) = now_stamp();
-    let file_name = format!("shot-{id}.png");
+    let ext = chosen_extension(settings);
+    let file_name = format!("shot-{id}.{ext}");
     let (w, h) = (img.width(), img.height());
+
+    // Encoded before the library lock is taken: JPEG on a 6K screenshot is tens of milliseconds
+    // that every other library operation would otherwise wait on.
+    let bytes = encode_image(&img, ext)?;
 
     let mut lib = state.lock().map_err(|e| e.to_string())?;
     let path = lib.path_of(&file_name);
-    img.save(&path).map_err(|e| e.to_string())?;
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
 
     let item = MediaItem {
         id: id.clone(),
@@ -318,11 +408,12 @@ fn save_image(
 #[tauri::command]
 pub fn capture_monitor(
     state: State<LibraryState>,
+    settings: State<SettingsState>,
     monitor_id: Option<u32>,
 ) -> Result<MediaItem, String> {
     let monitor = pick_monitor(monitor_id)?;
     let img = monitor.capture_image().map_err(|e| e.to_string())?;
-    save_draft(&state, img)
+    save_draft(&state, &settings, img)
 }
 
 /// Grab one region of a monitor into memory without touching the library.
@@ -348,15 +439,17 @@ pub fn capture_region_image(
 /// needs the library-writing half.
 pub fn save_draft_public(
     state: &State<LibraryState>,
+    settings: &State<SettingsState>,
     img: image::RgbaImage,
 ) -> Result<MediaItem, String> {
-    save_draft(state, img)
+    save_draft(state, settings, img)
 }
 
 /// Capture a rectangular region (physical pixels, relative to the monitor origin).
 #[tauri::command]
 pub fn capture_region(
     state: State<LibraryState>,
+    settings: State<SettingsState>,
     monitor_id: Option<u32>,
     x: u32,
     y: u32,
@@ -367,7 +460,7 @@ pub fn capture_region(
         return Err("Empty selection".into());
     }
     let cropped = capture_region_image(monitor_id, x, y, width, height)?;
-    save_draft(&state, cropped)
+    save_draft(&state, &settings, cropped)
 }
 
 /// Save an annotated PNG (base64 data-URL body) back over an existing item.
@@ -386,10 +479,32 @@ pub fn save_annotated(
         .map_err(|e| e.to_string())?;
     let (w, h) = (img.width(), img.height());
 
+    let file_name = {
+        let lib = state.lock().map_err(|e| e.to_string())?;
+        let item = lib.get(&id).ok_or_else(|| "Item not found".to_string())?;
+        item.file_name.clone()
+    };
+
+    // The canvas can only hand back a PNG, but the file on disk keeps whatever extension it was
+    // created with — writing these bytes into a `.jpg` would leave a file whose name lies about
+    // its contents, which every other tool that opens it by extension would then get wrong. So
+    // re-encode when the two differ, and take the fast path when they don't.
+    let ext = file_name.rsplit('.').next().unwrap_or("");
+    let out = if extension_for(ext) == "jpg" {
+        encode_image(&img.to_rgba8(), "jpg")?
+    } else {
+        bytes
+    };
+
     let mut lib = state.lock().map_err(|e| e.to_string())?;
-    let item = lib.get(&id).ok_or_else(|| "Item not found".to_string())?;
-    let path = lib.path_of(&item.file_name);
-    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    // Existence is re-checked under this lock, not the one that read the file name: the encode
+    // above happens with the library unlocked, and writing the file back for an item deleted in
+    // the meantime would leave an orphan on disk that nothing in the library points at.
+    if lib.get(&id).is_none() {
+        return Err("Item not found".into());
+    }
+    let path = lib.path_of(&file_name);
+    std::fs::write(&path, &out).map_err(|e| e.to_string())?;
     let size = file_size(&path);
     lib.update(&id, |it| {
         it.width = w;
@@ -408,3 +523,4 @@ pub fn keep_item(state: State<LibraryState>, id: String) -> Result<MediaItem, St
     lib.update(&id, |it| it.draft = false)
         .ok_or_else(|| "Item not found".to_string())
 }
+

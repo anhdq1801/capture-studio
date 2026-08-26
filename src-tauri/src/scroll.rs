@@ -185,6 +185,7 @@ pub fn scroll_step(scroll: State<ScrollState>) -> Result<ScrollStatus, String> {
 #[tauri::command]
 pub fn scroll_finish(
     lib: State<LibraryState>,
+    settings: State<crate::settings::SettingsState>,
     scroll: State<ScrollState>,
 ) -> Result<MediaItem, String> {
     let session = {
@@ -193,7 +194,7 @@ pub fn scroll_finish(
             .take()
             .ok_or_else(|| "No scrolling capture in progress".to_string())?
     };
-    save_draft_public(&lib, session.stitched)
+    save_draft_public(&lib, &settings, session.stitched)
 }
 
 #[tauri::command]

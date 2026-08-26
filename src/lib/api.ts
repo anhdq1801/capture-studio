@@ -90,9 +90,31 @@ export const RESOLUTIONS: { id: Resolution; label: string }[] = [
   { id: "480", label: "480p" },
 ];
 
+/** File type new captures are written as. */
+export type ImageFormat = "png" | "jpg";
+
+export const IMAGE_FORMATS: { id: ImageFormat; label: string; note: string }[] = [
+  { id: "png", label: "PNG", note: "Lossless, keeps transparency. Larger files." },
+  { id: "jpg", label: "JPEG", note: "Much smaller. No transparency, and slightly lossy." },
+];
+
+/**
+ * The MIME type of a saved capture, from its file name.
+ *
+ * Needed wherever a capture's bytes are wrapped in a `Blob` to be decoded: captures are saved
+ * as JPEG as well as PNG, and a Blob that misdescribes its contents is a decode failure waiting
+ * for the first browser that trusts the type instead of sniffing the bytes.
+ */
+export function imageMimeFor(pathOrName: string): string {
+  const ext = pathOrName.split(".").pop()?.toLowerCase();
+  return ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png";
+}
+
 export interface AppSettings {
   resolution: Resolution;
   codec: string;
+  /** "png" | "jpg" — applies to new captures; items already saved keep their extension. */
+  imageFormat: ImageFormat;
   /** BCP-47 tags in priority order, e.g. ["vi-VT", "en-US"]. */
   ocrLanguages: string[];
   /** Accelerator per shortcut id, e.g. `{"capture-region": "Control+Shift+2"}`. */

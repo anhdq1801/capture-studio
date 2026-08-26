@@ -10,6 +10,8 @@ import {
   Pricing,
   PricingTier,
   RESOLUTIONS,
+  IMAGE_FORMATS,
+  ImageFormat,
   AppSettings,
   Resolution,
   getLibraryDir,
@@ -415,6 +417,26 @@ export function Settings({
             </button>
           </div>
           <div className="hint">All screenshots and recordings are stored here.</div>
+        </div>
+
+        <div className="field">
+          <label>Screenshot format</label>
+          <div className="chips">
+            {IMAGE_FORMATS.map((f) => (
+              <button
+                key={f.id}
+                className={`chip ${rec?.imageFormat === f.id ? "active" : ""}`}
+                onClick={() => saveRec({ imageFormat: f.id as ImageFormat })}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="hint">
+            {IMAGE_FORMATS.find((f) => f.id === rec?.imageFormat)?.note}{" "}
+            Applies to new captures — screenshots already in your library keep the format they
+            were saved in.
+          </div>
         </div>
 
         <div className="field">

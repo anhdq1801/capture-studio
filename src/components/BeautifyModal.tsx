@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { MediaItem, importPng, itemPath, setClipboardPng } from "../lib/api";
+import { MediaItem, imageMimeFor, importPng, itemPath, setClipboardPng } from "../lib/api";
 import {
   ASPECTS,
   AspectId,
@@ -38,7 +38,7 @@ export function BeautifyModal({
       try {
         const p = await itemPath(item.id);
         const bytes = await readFile(p);
-        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const blob = new Blob([new Uint8Array(bytes)], { type: imageMimeFor(p) });
         const bmp = await createImageBitmap(blob);
         if (cancelled) {
           bmp.close();

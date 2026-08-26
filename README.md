@@ -65,6 +65,10 @@ finds ffmpeg on its own — Homebrew, MacPorts or `PATH`, no configuration.
 - **Image optimiser** — re-encode to WebP / JPEG / PNG with a quality slider and optional
   downscale, showing before/after sizes. PNG goes through lossless `oxipng`.
 - **Library** — a grid of everything captured, with notes, reveal-in-Finder and delete.
+- **PNG or JPEG** — pick which one captures are saved as in **Settings › General › Screenshot
+  format**. PNG is the default and is lossless; JPEG is much smaller but drops transparency and
+  is slightly lossy. The choice applies to new captures only — anything already in your library
+  keeps the format it was saved in.
 - **Import** — an existing image file, or whatever is on the clipboard.
 - **Menu-bar app** — closing the window hides it to the tray rather than quitting. Optional
   launch at startup.
