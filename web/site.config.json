@@ -1,5 +1,5 @@
 {
-  "LEGAL_ENTITY": "",
+  "LEGAL_ENTITY": "Dang Quoc Anh",
   "REGISTERED_ADDRESS": "",
   "SUPPORT_EMAIL": "",
   "SUPPORT_RESPONSE_DAYS": "",
@@ -9,7 +9,7 @@
   "GRACE_DAYS": "30",
   "REFUND_WINDOW_DAYS": "",
   "API_BASE_URL": "",
-  "DOWNLOAD_URL": "",
+  "DOWNLOAD_URL": "https://github.com/anhdq1801/capture-studio/releases/latest",
   "SHOT_EDITOR": "assets/shots/editor.png",
   "SHOT_OCR": "assets/shots/ocr.png",
   "SHOT_LIBRARY": "assets/shots/library.png",

@@ -23,7 +23,25 @@ const OUT = path.join(WEB, "dist");
 const CONFIG = path.join(WEB, "site.config.json");
 
 /** Files that describe the site to developers rather than being part of it. */
-const NOT_SHIPPED = new Set(["README.md", "build.mjs", "site.config.json", "dist"]);
+const NOT_SHIPPED = new Set([
+  "README.md",
+  "build.mjs",
+  "site.config.json",
+  "dist",
+
+  // The commerce half of the site, held back for the same reason as COMMERCE_ENABLED in the
+  // app: nothing is on sale and the backend is not deployed. Publishing a terms of service, a
+  // refund policy and a price list for a product nobody can buy would not be an empty gesture
+  // — it would be a set of promises about a service that does not exist, carrying a legal
+  // entity and an address that would have to be invented to fill them in. The pages are
+  // written and stay in the repo; the day the service is real, take them out of this list and
+  // fill in site.config.json.
+  "pricing.html",
+  "terms.html",
+  "privacy.html",
+  "refund.html",
+  "reset.html",
+]);
 
 /** Only text formats are scanned; an image containing `[[` is a coincidence, not a placeholder. */
 const SUBSTITUTABLE = new Set([".html", ".css", ".js", ".json", ".txt", ".xml", ".svg"]);
