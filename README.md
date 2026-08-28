@@ -7,31 +7,17 @@ bar, without a window in the way. Built with **Tauri v2 + React + Rust**.
 
 ## Download
 
-> ### Apple Silicon only
->
-> The released build is a plain `arm64` binary. **It does not run on Intel Macs** — Rosetta
-> translates Intel → Apple Silicon, not the other way round, so an Intel Mac cannot run this no
-> matter what. You need an M1 or later (any Mac sold from late 2020 onwards).
->
-> The filename says so too: `Capture Studio_1.0.0_aarch64.dmg`.
-
 Download the `.dmg` from [Releases](https://github.com/anhdq1801/capture-studio/releases).
+
+One file covers every Mac: the build is a universal binary carrying both `arm64` and `x86_64`,
+so it runs natively on Apple Silicon and on Intel without Rosetta. macOS picks the right half at
+launch; the other one only takes up disk space.
 
 ### First run
 
 **1. Install.** Open the `.dmg` and drag **Capture Studio** into Applications.
 
-**2. Let macOS open it.** The first launch is blocked with *"Apple could not verify Capture Studio
-is free of malware."* The app is signed, but not notarised by Apple, so macOS asks you to confirm
-once:
-
-> **System Settings › Privacy & Security** → scroll to the bottom → **Open Anyway** → launch the
-> app again.
-
-Right-clicking the app and choosing *Open* no longer works for this on macOS 15 and later; the
-Settings route is the one that does.
-
-**3. Grant Screen Recording, then restart the app.** macOS applies that permission only to a
+**2. Grant Screen Recording, then restart the app.** macOS applies that permission only to a
 *fresh launch*, so granting it does nothing to the app that is already running. Quit Capture
 Studio completely and open it again.
 
@@ -39,7 +25,7 @@ Skipping the restart is the one mistake that looks like a broken app rather than
 permission: captures come back as the bare desktop wallpaper with every window stripped out,
 because that is exactly what macOS hands to an app it has not authorised.
 
-**4. For screen recording only, install ffmpeg.**
+**3. For screen recording only, install ffmpeg.**
 
 ```bash
 brew install ffmpeg
@@ -141,7 +127,33 @@ export APPLE_SIGNING_IDENTITY="<your certificate's SHA-1, from: security find-id
 
 Without it the build still succeeds, unsigned — fine for running it yourself, not for handing
 to anyone else. To notarise as well, set `APPLE_ID`, `APPLE_PASSWORD` (an app-specific
-password) and `APPLE_TEAM_ID` before building, and Tauri handles the rest.
+password) and `APPLE_TEAM_ID` before building. Note that the certificate has to be a
+**Developer ID Application** one; an *Apple Development* certificate signs fine but Apple
+refuses to notarise it.
+
+Tauri notarises and staples the `.app`, then builds the `.dmg` and only *signs* it — the disk
+image itself never receives a ticket, so anyone downloading it is stopped by Gatekeeper before
+the stapled app inside is ever reached. Submit it separately:
+
+```bash
+cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
+xcrun notarytool submit "Capture Studio_1.0.0_universal.dmg" --keychain-profile "<profile>" --wait
+xcrun stapler staple "Capture Studio_1.0.0_universal.dmg"
+```
+
+Treat a release as unfinished until `xcrun stapler validate` passes on *both* bundles. The
+honest end-to-end check is to copy the `.dmg`, set `com.apple.quarantine` on the copy and
+confirm `spctl -a -t open --context context:primary-signature` still says accepted — without
+that attribute the check never exercises what a real download does.
+
+Releases are universal binaries, which needs the Intel target installed once:
+
+```bash
+rustup target add x86_64-apple-darwin
+npm run tauri build -- --target universal-apple-darwin
+```
+
+The plain `npm run tauri build` above is the faster arm64-only build, for development.
 
 ### Windows
 
