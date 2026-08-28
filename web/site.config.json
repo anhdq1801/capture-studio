@@ -10,8 +10,9 @@
   "REFUND_WINDOW_DAYS": "",
   "API_BASE_URL": "",
   "DOWNLOAD_URL": "",
-  "SHOT_EDITOR": "",
-  "SHOT_OVERLAY": "",
-  "SHOT_OCR": "",
-  "SHOT_LIBRARY": ""
+  "SHOT_EDITOR": "assets/shots/editor.png",
+  "SHOT_OCR": "assets/shots/ocr.png",
+  "SHOT_LIBRARY": "assets/shots/library.png",
+  "SHOT_RECORD": "assets/shots/record.png",
+  "SHOT_OPTIMIZE": "assets/shots/optimize.png"
 }

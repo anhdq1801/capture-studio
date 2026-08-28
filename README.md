@@ -3,6 +3,17 @@
 Screenshots, screen recording, scrolling capture and text recognition for macOS — from the menu
 bar, without a window in the way. Built with **Tauri v2 + React + Rust**.
 
+![The annotation editor, with a box and arrow marking one area, a numbered step, a text label and a blurred row](web/assets/shots/editor.png)
+
+<p align="center"><em>The editor opens on every capture, before anything is saved.</em></p>
+
+| | |
+|:--:|:--:|
+| ![The screen recording dialog](web/assets/shots/record.png) | ![The text recognition languages](web/assets/shots/ocr.png) |
+| **Record** the screen, a window, or one region | **Read text** off the screen, offline, in your language |
+| ![The image optimiser](web/assets/shots/optimize.png) | ![The library grid, with the capture menu down the side](web/assets/shots/library.png) |
+| **Optimise** a whole folder to WebP, JPEG or PNG | **Everything you kept**, on your own disk |
+
 ---
 
 ## Download
