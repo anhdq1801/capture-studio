@@ -20,6 +20,14 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
+    # Creating the release and uploading the installers to it is a write to the
+    # repository, and the default GITHUB_TOKEN is read-only. Without this the whole
+    # job builds successfully and then dies on the last step with "Resource not
+    # accessible by integration", which reads like a broken build rather than a
+    # missing scope.
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
