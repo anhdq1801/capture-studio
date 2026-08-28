@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { getAppSettings, setShortcuts as setShortcutsCmd } from "./api";
+import { isMac } from "./platform";
 
 /**
  * The shortcut ids, and the combination each ships with. Mirrors `settings::SHORTCUTS` on the
@@ -21,8 +22,6 @@ export type ShortcutMap = Record<string, string>;
 
 export const SHORTCUT_IDS = Object.keys(SHORTCUT_DEFAULTS) as ShortcutId[];
 
-const isMac =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform ?? "");
 
 /**
  * Every surface that prints a shortcut reads from here.

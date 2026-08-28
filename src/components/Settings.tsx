@@ -17,6 +17,7 @@ import {
   getLibraryDir,
   getAppSettings,
   setAppSettings,
+  setClipboardText,
   listVideoCodecs,
   listOcrLanguages,
   OcrLanguage,
@@ -44,6 +45,7 @@ import { ShortcutRecorder } from "./ShortcutRecorder";
 import { Toggle } from "./Modal";
 import { QrCode } from "./QrCode";
 import { COMMERCE_ENABLED } from "../lib/features";
+import { isMac, isWindows } from "../lib/platform";
 import { DONATE_URL } from "../lib/links";
 
 /**
@@ -509,7 +511,7 @@ export function Settings({
           <div
             className="box"
             style={{
-              display: "flex",
+              display: ffmpeg === false ? "block" : "flex",
               alignItems: "center",
               gap: 10,
               background: "var(--bg-elev)",
@@ -523,9 +525,7 @@ export function Settings({
             ) : ffmpeg ? (
               <span style={{ color: "var(--success)" }}>✓ ffmpeg detected — recording ready</span>
             ) : (
-              <span style={{ color: "var(--danger)" }}>
-                ✗ ffmpeg not found — install it to enable screen recording
-              </span>
+              <FfmpegMissing toast={toast} onFound={() => setFfmpeg(true)} />
             )}
           </div>
         </div>
@@ -811,6 +811,106 @@ export function Settings({
         <div className="hint" style={{ marginTop: 24 }}>
           Capture Studio v0.1 · Tauri + Rust · cross-platform (macOS & Windows)
         </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * What to do about a missing ffmpeg, rather than only the news that it is missing.
+ *
+ * The person reading this is inside the app, at the moment recording failed — sending them to
+ * a README on GitHub asks them to leave, find the repo and search it, which most will not do.
+ * It matters most on Windows: there is no Homebrew there, and the alternative to a command
+ * they can copy is downloading a zip and editing PATH by hand.
+ *
+ * "Check again" exists because the install happens in another window; without it the only way
+ * to clear this panel is to restart the app, which reads as the install having failed.
+ */
+function FfmpegMissing({
+  toast,
+  onFound,
+}: {
+  toast: (t: string, k?: "ok" | "err" | "info") => void;
+  onFound: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+
+  // winget ships with Windows 10 and 11, so it is the one route that needs nothing installed
+  // first. The others are listed below rather than offered as the headline.
+  const command = isMac ? "brew install ffmpeg" : "winget install ffmpeg";
+  const alternatives = isMac
+    ? "MacPorts (port install ffmpeg) works too, as does a build from ffmpeg.org."
+    : isWindows
+      ? "Chocolatey (choco install ffmpeg) and Scoop (scoop install ffmpeg) work too, as does unpacking a build from ffmpeg.org yourself."
+      : "Your distribution's package manager will have it — apt, dnf or pacman.";
+
+  const recheck = async () => {
+    setChecking(true);
+    try {
+      if (await checkFfmpeg()) {
+        onFound();
+        toast("ffmpeg found — recording is ready");
+      } else {
+        toast("Still not finding it. Open a new terminal and check ffmpeg -version works.", "info");
+      }
+    } catch (e) {
+      toast(String(e), "err");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ color: "var(--danger)" }}>✗ ffmpeg not found — screen recording is disabled</div>
+      <div className="hint" style={{ marginTop: 6 }}>
+        Everything else works without it: screenshots, annotation, text recognition, scrolling
+        capture and the optimiser. Recording is the only feature that needs it.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+        <code
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflowX: "auto",
+            whiteSpace: "nowrap",
+            background: "var(--bg-elev-2)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }}
+        >
+          {command}
+        </code>
+        <button
+          className="btn sm"
+          onClick={() =>
+            setClipboardText(command)
+              .then(() => toast("Command copied"))
+              .catch((e) => toast(String(e), "err"))
+          }
+        >
+          Copy
+        </button>
+      </div>
+
+      <div className="hint" style={{ marginTop: 8 }}>{alternatives}</div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button className="btn sm" onClick={recheck} disabled={checking}>
+          {checking ? <i className="spin" /> : "Check again"}
+        </button>
+        <button
+          className="btn ghost sm"
+          onClick={() =>
+            openUrl("https://ffmpeg.org/download.html").catch((e) => toast(String(e), "err"))
+          }
+        >
+          Download page
+        </button>
       </div>
     </>
   );

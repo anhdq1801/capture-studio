@@ -95,6 +95,8 @@ fn resolve_ffmpeg() -> Option<PathBuf> {
             home.join(".local/bin").join(FFMPEG_EXE),
             home.join("bin").join(FFMPEG_EXE),
             home.join("AppData/Local/Microsoft/WinGet/Links").join(FFMPEG_EXE),
+            // Scoop keeps its shims here; without this a scoop install reads as "not found".
+            home.join("scoop/shims").join(FFMPEG_EXE),
         ];
         for path in user_paths {
             if path.is_file() && ffmpeg_works(&path) {

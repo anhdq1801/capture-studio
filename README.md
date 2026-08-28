@@ -28,11 +28,15 @@ because that is exactly what macOS hands to an app it has not authorised.
 **3. For screen recording only, install ffmpeg.**
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg          # macOS
+winget install ffmpeg        # Windows — winget ships with Windows 10 and 11
 ```
 
-Screenshots, annotation, OCR, scrolling capture and the optimiser all work without it. The app
-finds ffmpeg on its own — Homebrew, MacPorts or `PATH`, no configuration.
+Screenshots, annotation, OCR, scrolling capture and the optimiser all work without it;
+recording is the only feature that does not. The app finds ffmpeg on its own — Homebrew,
+MacPorts, winget, Chocolatey, Scoop or anything already on `PATH`, no configuration. If it is
+still not found, **Settings › Recording** has the command for your platform and a button to
+check again without restarting.
 
 ---
 
