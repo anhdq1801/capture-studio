@@ -17,3 +17,7 @@ export const RESET_URL = `${SITE_URL}/reset.html`;
 
 /** Licence purchase. Still a placeholder — set this before shipping a build that shows it. */
 export const BUY_URL = "https://example.com/capture-studio/license";
+
+/** "Buy the author a coffee" in Settings — shown as a link and as a QR code, so a phone
+ *  camera can take it straight from the screen without typing anything. */
+export const DONATE_URL = "https://paypal.me/QuocAnhD?locale.x=en_US&country.x=VN";

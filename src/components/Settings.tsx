@@ -42,7 +42,9 @@ import { formatBytes } from "../lib/format";
 import { SHORTCUT_ROWS } from "../lib/actions";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { Toggle } from "./Modal";
+import { QrCode } from "./QrCode";
 import { COMMERCE_ENABLED } from "../lib/features";
+import { DONATE_URL } from "../lib/links";
 
 /**
  * Settings used to be one long scroll. Splitting it means the thing you came to change is on
@@ -460,6 +462,41 @@ export function Settings({
                 {m.scaleFactor}x
               </div>
             ))}
+          </div>
+        </div>
+        <div className="field">
+          <label>Support Capture Studio</label>
+          <div
+            className="box"
+            style={{
+              display: "flex",
+              gap: 16,
+              alignItems: "center",
+              background: "var(--bg-elev)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: "14px 16px",
+            }}
+          >
+            {/* The QR is here so the phone in your hand can pay without the desktop having to
+                hand a link over to it — point the camera at the screen and that is the whole
+                flow. The button covers the case where the browser is the easier route. */}
+            <QrCode value={DONATE_URL} size={180} title="Donate via PayPal" />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
+              <div className="hint" style={{ marginTop: 0 }}>
+                Capture Studio is free, with every feature included. If it saves you time,
+                a coffee keeps it being worked on. Scan the code with your phone, or open
+                PayPal here.
+              </div>
+              <button
+                className="btn sm"
+                style={{ marginTop: 10 }}
+                onClick={() => openUrl(DONATE_URL).catch((e) => toast(String(e), "err"))}
+              >
+                Donate with PayPal
+              </button>
+            </div>
           </div>
         </div>
           </>
