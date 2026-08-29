@@ -121,7 +121,15 @@ mod backend {
                     if text.is_empty() {
                         continue;
                     }
-                    lines.push(OcrLine { text, confidence: best.confidence() });
+                    // SAFETY: reading a geometry property off an observation Vision handed
+                    // back and that is still alive for this iteration.
+                    let bb = unsafe { obs.boundingBox() };
+                    lines.push(OcrLine {
+                        text,
+                        confidence: best.confidence(),
+                        y: bb.origin.y as f32,
+                        height: bb.size.height as f32,
+                    });
                 }
             }
         }

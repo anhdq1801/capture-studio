@@ -50,6 +50,8 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 /** Where "Get a licence" goes. Replace once the storefront exists. */
 import { AccountModal } from "./components/AccountModal";
 import { Toasts, ToastMsg } from "./components/Toasts";
+import { toParagraphs, paragraphText } from "./lib/paragraphs";
+import { openTextPanel } from "./lib/textpanel";
 
 export type Filter = "all" | "screenshot" | "recording";
 export type View = "library" | "optimize" | "settings";
@@ -588,14 +590,11 @@ export default function App() {
           toast("No text found in that area", "info");
           return;
         }
-        await setClipboardText(res.text);
-        const n = res.lines.length;
-        toast(
-          res.lowConfidence > 0
-            ? `Copied ${n} line${n === 1 ? "" : "s"} — ${res.lowConfidence} may be misread`
-            : `Copied ${n} line${n === 1 ? "" : "s"} to the clipboard`,
-          res.lowConfidence > 0 ? "info" : "ok"
-        );
+        // Clipboard first, before anything is drawn: the fast path is press-shortcut-drag-paste,
+        // and it should not wait on a window opening.
+        const paras = toParagraphs(res.lines);
+        await setClipboardText(paragraphText(paras));
+        await openTextPanel(paras, rect);
       } catch (err) {
         toast(String(err), "err");
       } finally {

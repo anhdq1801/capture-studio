@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
         scrollbar: "scrollbar.html",
         regionhint: "regionhint.html",
         editor: "editor.html",
+        textpanel: "textpanel.html",
       },
     },
   },

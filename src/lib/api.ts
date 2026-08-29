@@ -305,6 +305,10 @@ export const snoozeLicenseNudge = () => invoke<void>("snooze_license_nudge");
 export interface OcrLine {
   text: string;
   confidence: number;
+  /** Vision's normalised bounding box, origin bottom-left: a larger `y` sits higher up. Used to
+   *  work out where paragraphs ended — see `lib/paragraphs.ts`. */
+  y: number;
+  height: number;
 }
 
 export interface OcrResult {

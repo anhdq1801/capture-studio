@@ -188,6 +188,12 @@ pub struct OcrLine {
     pub text: String,
     /// 0..1 from the recogniser. Low values mark lines worth eyeballing rather than trusting.
     pub confidence: f32,
+    /// Where the line sat in the image, normalised 0..1 with the origin at the bottom left —
+    /// Vision's own convention, passed through rather than converted so there is one place to
+    /// reason about it. Kept because a flat list of lines cannot say where a paragraph ended:
+    /// that is a question about the vertical gaps between them.
+    pub y: f32,
+    pub height: f32,
 }
 
 #[derive(Serialize, Clone, Debug)]
