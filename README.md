@@ -58,6 +58,8 @@ check again without restarting.
 - **Scrolling Capture** — stitch a page taller than the screen.
 - **Capture Text (OCR)** — recognise text in a region straight to the clipboard, using the
   recogniser built into macOS. Vietnamese and English out of the box, no download, no API key.
+  A panel opens beside the region with what was read, laid back out into paragraphs, with
+  anything the recogniser was unsure about marked so you can correct it before pasting.
 - **Screen recording** — full screen or a region, microphone or loopback audio, adjustable frame
   rate and cursor capture, with a floating stop bar and a live timer. Outputs `.mp4`.
 - **Annotation editor** — arrow, line, rectangle, ellipse, pen, highlighter, text,
