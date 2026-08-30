@@ -157,8 +157,11 @@ the stapled app inside is ever reached. Submit it separately:
 
 ```bash
 cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
-xcrun notarytool submit "Capture Studio_1.0.0_universal.dmg" --keychain-profile "<profile>" --wait
-xcrun stapler staple "Capture Studio_1.0.0_universal.dmg"
+# Named once rather than twice, so a version bump does not leave one of these two lines
+# pointing at a file that is no longer there.
+dmg="Capture Studio_1.1.0_universal.dmg"
+xcrun notarytool submit "$dmg" --keychain-profile "<profile>" --wait
+xcrun stapler staple "$dmg"
 ```
 
 Treat a release as unfinished until `xcrun stapler validate` passes on *both* bundles. The
