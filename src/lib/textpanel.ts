@@ -30,6 +30,10 @@ export async function openTextPanel(
   const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, 96 + lines * 21));
 
   const payload = encodeURIComponent(JSON.stringify(paragraphs));
+  // The label has to appear in `src-tauri/capabilities/default.json` under `windows`, or the
+  // window opens with no permissions at all and every Tauri call from inside it fails quietly —
+  // close, pin and copy all do nothing, with no error to say why. JSON takes no comments, so
+  // the reminder lives here, next to the line that creates the window.
   const win = new WebviewWindow("textpanel", {
     url: `textpanel.html?paragraphs=${payload}`,
     width: WIDTH,
