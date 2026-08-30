@@ -50,9 +50,10 @@ tokio-util = { version = "0.7", features = ["codec"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
-# Text recognition runs on the OS's own engine — Vision on macOS — so OCR stays offline and
-# adds no model files to the bundle. The project already depends on 26 objc2 crates for the
-# rest of its macOS integration, so this is one more of the same family, not a new toolchain.
+# Text recognition runs on the OS's own engine — Vision on macOS, Windows.Media.Ocr on Windows —
+# so OCR stays offline and adds no model files to the bundle. The project already depends on 26
+# objc2 crates for the rest of its macOS integration, so this is one more of the same family,
+# not a new toolchain.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSData", "NSValue", "NSGeometry", "NSError", "NSLocale"] }
@@ -64,3 +65,15 @@ objc2-vision = { version = "0.3", features = [
     "VNTypes",
 ] }
 
+# Only the namespaces ocr.rs touches. The `windows` crate is generated per feature, so an
+# unlisted namespace is not compiled at all rather than merely unused.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Win32_System_WinRT",
+] }

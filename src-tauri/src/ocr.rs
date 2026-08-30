@@ -1,13 +1,15 @@
 //! Text recognition, running entirely on the operating system's own engine.
 //!
-//! On macOS that is Vision (`VNRecognizeTextRequest`), the same recogniser behind Live Text.
-//! Using it instead of bundling Tesseract keeps this offline, adds no model files to a 27 MB
-//! app bundle, and gets Apple's accuracy — including Vietnamese, which Vision has supported
-//! since it grew past its original handful of Latin languages.
+//! On macOS that is Vision (`VNRecognizeTextRequest`), the same recogniser behind Live Text; on
+//! Windows it is `Windows.Media.Ocr`, which ships with the OS and recognises whichever languages
+//! the user has installed. Bundling Tesseract instead would mean carrying the library and a
+//! traineddata file per language — tens of megabytes onto a 16 MB app — to get worse results on
+//! screen text than either system engine already gives for free.
 //!
-//! Images are handed to Vision as encoded PNG bytes via `initWithData:options:` rather than
-//! by constructing a `CGImage` by hand: Vision decodes the data itself, so there is no manual
-//! pixel-format, stride or colour-space plumbing to get subtly wrong.
+//! Both backends take encoded image bytes and let the OS decode them, rather than handing over a
+//! pixel buffer: no manual stride, pixel-format or colour-space plumbing to get subtly wrong.
+//! They differ in what they can report, and the difference is not hidden — Vision scores every
+//! line, Windows scores none, so the "check this line" warnings only appear on macOS.
 
 use crate::capture::capture_region_image;
 use crate::library::LibraryState;
@@ -143,19 +145,175 @@ mod backend {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod backend {
+    use super::{OcrLanguage, OcrLine, OcrResult};
+    use windows::core::HSTRING;
+    use windows::Globalization::Language;
+    use windows::Graphics::Imaging::{BitmapDecoder, SoftwareBitmap};
+    use windows::Media::Ocr::OcrEngine;
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
+
+    const NO_ENGINE: &str = "Windows has no text-recognition language installed. Open Settings > \
+         Time & language > Language & region, click the three dots next to a language, choose \
+         \"Language options\", and add \"Optical character recognition\".";
+
+    fn err(e: windows::core::Error) -> String {
+        e.message()
+    }
+
+    /// Runs `f` on a thread this module owns, in a multithreaded apartment.
+    ///
+    /// WinRT will not activate a class on a thread where COM was never initialised, and blocking
+    /// on an async operation from a single-threaded apartment deadlocks outright. Tauri promises
+    /// neither about the thread a command lands on, so rather than inspect the caller's apartment
+    /// and hope, this borrows nothing and sets up its own.
+    fn on_mta<T: Send>(f: impl FnOnce() -> Result<T, String> + Send) -> Result<T, String> {
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                // Err here means the thread was already an STA, which we did not create and must
+                // not tear down — so the uninit below is paired only with an init that took.
+                let owned = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
+                let out = f();
+                if owned {
+                    unsafe { RoUninitialize() }
+                }
+                out
+            })
+            .join()
+            .unwrap_or_else(|_| Err("Text recognition failed unexpectedly.".into()))
+        })
+    }
+
+    /// Encoded bytes -> `SoftwareBitmap`, by way of an in-memory WinRT stream because a stream is
+    /// the only thing `BitmapDecoder` will read from.
+    ///
+    /// The no-argument `GetSoftwareBitmapAsync` hands back BGRA8 premultiplied, which is exactly
+    /// what `OcrEngine` accepts, so there is no pixel conversion step here.
+    fn decode(bytes: &[u8]) -> Result<SoftwareBitmap, String> {
+        let stream = InMemoryRandomAccessStream::new().map_err(err)?;
+        let writer = DataWriter::CreateDataWriter(&stream).map_err(err)?;
+        writer.WriteBytes(bytes).map_err(err)?;
+        writer.StoreAsync().map_err(err)?.join().map_err(err)?;
+        writer.FlushAsync().map_err(err)?.join().map_err(err)?;
+        // Detached, or dropping the writer closes the stream we are about to read back.
+        writer.DetachStream().map_err(err)?;
+        stream.Seek(0).map_err(err)?;
+
+        let decoder = BitmapDecoder::CreateAsync(&stream)
+            .map_err(err)?
+            .join()
+            .map_err(err)?;
+        decoder
+            .GetSoftwareBitmapAsync()
+            .map_err(err)?
+            .join()
+            .map_err(err)
+    }
+
+    /// One engine, one language — unlike Vision, which takes a list and sorts it out itself.
+    /// The user's preference order decides, and anything they picked that this machine has no
+    /// recognizer for is skipped rather than treated as an error.
+    fn engine_for(langs: &[String]) -> Result<OcrEngine, String> {
+        for tag in langs {
+            let Ok(lang) = Language::CreateLanguage(&HSTRING::from(tag.as_str())) else {
+                continue;
+            };
+            if let Ok(engine) = OcrEngine::TryCreateFromLanguage(&lang) {
+                return Ok(engine);
+            }
+        }
+        OcrEngine::TryCreateFromUserProfileLanguages().map_err(|_| NO_ENGINE.to_string())
+    }
+
+    pub fn languages() -> Result<Vec<OcrLanguage>, String> {
+        on_mta(|| {
+            let mut out = Vec::new();
+            for lang in OcrEngine::AvailableRecognizerLanguages()
+                .map_err(err)?
+                .into_iter()
+            {
+                out.push(OcrLanguage {
+                    id: lang.LanguageTag().map_err(err)?.to_string(),
+                    // Already localised to the user's display language, matching what the macOS
+                    // side asks Foundation for.
+                    label: lang.DisplayName().map_err(err)?.to_string(),
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn recognize(bytes: &[u8], langs: &[String]) -> Result<OcrResult, String> {
+        on_mta(|| {
+            let bitmap = decode(bytes)?;
+            let image_height = bitmap.PixelHeight().map_err(err)? as f32;
+            let engine = engine_for(langs)?;
+            let result = engine
+                .RecognizeAsync(&bitmap)
+                .map_err(err)?
+                .join()
+                .map_err(err)?;
+
+            let mut lines = Vec::new();
+            for line in result.Lines().map_err(err)?.into_iter() {
+                let text = line.Text().map_err(err)?.to_string();
+                if text.trim().is_empty() {
+                    continue;
+                }
+
+                // Windows gives a rectangle per word and none for the line, so the line's box is
+                // the union of its words'. Those rectangles are in pixels with the origin at the
+                // top left; `OcrLine` is defined in Vision's terms — normalised, origin bottom
+                // left — so the conversion happens here rather than leaving two conventions for
+                // the paragraph grouper to tell apart.
+                let (mut top, mut bottom) = (f32::MAX, f32::MIN);
+                for word in line.Words().map_err(err)?.into_iter() {
+                    if let Ok(r) = word.BoundingRect() {
+                        top = top.min(r.Y);
+                        bottom = bottom.max(r.Y + r.Height);
+                    }
+                }
+                let boxed = bottom > top && image_height > 0.0;
+
+                lines.push(OcrLine {
+                    text,
+                    // Windows OCR reports no per-line confidence at all. Rather than invent a
+                    // number, every line is marked certain: the panel then shows no warnings on
+                    // Windows, which is honest, where a guessed score would mark the wrong ones.
+                    confidence: 1.0,
+                    y: if boxed { 1.0 - bottom / image_height } else { 0.0 },
+                    height: if boxed { (bottom - top) / image_height } else { 0.0 },
+                });
+            }
+
+            Ok(OcrResult {
+                text: lines
+                    .iter()
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                lines,
+                low_confidence: 0,
+            })
+        })
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 mod backend {
     use super::{OcrLanguage, OcrResult};
 
     const UNSUPPORTED: &str =
-        "Text recognition is only available on macOS in this build — it uses the system's \
-         built-in Vision engine rather than a bundled one.";
+        "Text recognition uses the operating system's own engine, and this build has none for \
+         this platform.";
 
     pub fn languages() -> Result<Vec<OcrLanguage>, String> {
         Ok(Vec::new())
     }
 
-    pub fn recognize(_png: &[u8], _langs: &[String]) -> Result<OcrResult, String> {
+    pub fn recognize(_bytes: &[u8], _langs: &[String]) -> Result<OcrResult, String> {
         Err(UNSUPPORTED.into())
     }
 }
@@ -170,9 +328,13 @@ fn recognize_bytes(bytes: &[u8], langs: &[String]) -> Result<OcrResult, String> 
 
 /// Whether this build can recognise text at all, so the UI can hide the feature rather than
 /// offer a button that only ever errors.
+///
+/// True on Windows even when no recognizer language pack is installed: the engine is there, the
+/// user simply has to add a language, and `recognize` says so in words they can act on. Hiding
+/// the feature instead would leave them nothing to read.
 #[tauri::command]
 pub fn ocr_available() -> bool {
-    cfg!(target_os = "macos")
+    cfg!(any(target_os = "macos", windows))
 }
 
 #[tauri::command]

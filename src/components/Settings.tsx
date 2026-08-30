@@ -592,7 +592,9 @@ export function Settings({
           <>
             {ocrLangs.length === 0 && (
               <div className="hint">
-                This build has no system text recogniser available.
+                {isWindows
+                  ? "Windows has the recogniser but no language installed for it. Open Settings > Time & language > Language & region, click the three dots beside a language, choose Language options, and add Optical character recognition."
+                  : "This build has no system text recogniser available."}
               </div>
             )}
             {rec && ocrLangs.length > 0 && (
@@ -610,13 +612,20 @@ export function Settings({
                   ))}
                 </div>
                 <div className="hint">
-                  Pick every language you capture — the recogniser takes several at once and
-                  treats the order you switch them on as priority. Recognition runs on macOS's
-                  own engine, offline, so nothing leaves this machine.
+                  {isMac
+                    ? "Pick every language you capture — the recogniser takes several at once and treats the order you switch them on as priority."
+                    : "Windows recognises one language at a time, so the first one switched on that this machine has a recogniser for is the one used. The list shows only what is installed — add more under Settings > Time & language > Language & region."}{" "}
+                  Recognition runs on this machine's own engine, offline, so nothing leaves it.
                 </div>
                 {rec.ocrLanguages.length === 0 && (
                   <div className="hint warn">
                     With no language selected, Capture Text falls back to English.
+                  </div>
+                )}
+                {!isMac && (
+                  <div className="hint">
+                    Windows reports no confidence score for what it reads, so the panel cannot
+                    mark the lines worth double-checking the way it does on macOS.
                   </div>
                 )}
               </div>

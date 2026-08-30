@@ -57,9 +57,12 @@ check again without restarting.
   sidebar, or a global shortcut.
 - **Scrolling Capture** — stitch a page taller than the screen.
 - **Capture Text (OCR)** — recognise text in a region straight to the clipboard, using the
-  recogniser built into macOS. Vietnamese and English out of the box, no download, no API key.
-  A panel opens beside the region with what was read, laid back out into paragraphs, with
-  anything the recogniser was unsure about marked so you can correct it before pasting.
+  recogniser built into the operating system: Vision on macOS, `Windows.Media.Ocr` on Windows.
+  No download, no model files, no API key. Vietnamese and English work out of the box on macOS;
+  on Windows they depend on which language packs are installed, and the app says which are
+  missing. A panel opens beside the region with what was read, laid back out into paragraphs.
+  On macOS anything the recogniser was unsure about is marked so you can correct it before
+  pasting — Windows reports no confidence scores, so nothing is marked there.
 - **Screen recording** — full screen or a region, microphone or loopback audio, adjustable frame
   rate and cursor capture, with a floating stop bar and a live timer. Outputs `.mp4`.
 - **Annotation editor** — arrow, line, rectangle, ellipse, pen, highlighter, text,
@@ -177,9 +180,10 @@ The plain `npm run tauri build` above is the faster arm64-only build, for develo
 > **Untested.** The Rust source has Windows paths throughout — screen capture, recording via
 > `gdigrab`/`dshow`, reveal-in-Explorer — and the macOS-only dependencies are gated so they are
 > never compiled elsewhere. But nobody has built or run this on Windows, so treat it as a
-> starting point rather than a supported target. **Text recognition (OCR) is macOS-only** either
-> way: it uses Apple's Vision framework, and off macOS the feature reports itself unavailable
-> instead of appearing.
+> starting point rather than a supported target. Text recognition does work on Windows, through
+> `Windows.Media.Ocr`, but it needs at least one language pack with the OCR feature installed —
+> Settings > Time & language > Language & region > a language's options > Optical character
+> recognition. Without one, the app says so rather than failing silently.
 
 Install, in this order:
 
@@ -217,7 +221,7 @@ shortcuts are the same `Ctrl+Shift+…` on both platforms.
 | Screenshot capture | Rust `xcap` |
 | Image encode/optimize | Rust `image`, `webp` (libwebp), `oxipng` |
 | Screen recording | system `ffmpeg` (avfoundation on macOS, gdigrab + dshow on Windows) |
-| Text recognition | Apple Vision via `objc2-vision` (macOS only) |
+| Text recognition | OS engines: Apple Vision via `objc2-vision`, `Windows.Media.Ocr` via `windows` |
 | UI | React + TypeScript + Vite |
 | Shell | Tauri v2 |
 
