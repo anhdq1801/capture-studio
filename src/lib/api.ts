@@ -324,6 +324,8 @@ export interface OcrLanguage {
 }
 
 export const ocrAvailable = () => invoke<boolean>("ocr_available");
+/** Whether the optional Tesseract engine is installed, so Settings can offer to explain it. */
+export const tesseractAvailable = () => invoke<boolean>("tesseract_available");
 export const listOcrLanguages = () => invoke<OcrLanguage[]>("list_ocr_languages");
 /** Read text straight off the screen. Nothing is saved to the library. */
 export const ocrRegion = (

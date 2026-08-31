@@ -591,6 +591,7 @@ pub fn run() {
             license::remove_license,
             license::snooze_license_nudge,
             ocr::ocr_available,
+            ocr::tesseract_available,
             ocr::list_ocr_languages,
             ocr::ocr_region,
             ocr::ocr_item,

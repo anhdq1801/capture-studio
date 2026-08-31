@@ -56,13 +56,17 @@ check again without restarting.
 - **Capture Area, Screen, Window**, and a **3-second delayed** shot — from the menu bar, the
   sidebar, or a global shortcut.
 - **Scrolling Capture** — stitch a page taller than the screen.
-- **Capture Text (OCR)** — recognise text in a region straight to the clipboard, using the
-  recogniser built into the operating system: Vision on macOS, `Windows.Media.Ocr` on Windows.
-  No download, no model files, no API key. Vietnamese and English work out of the box on macOS;
-  on Windows they depend on which language packs are installed, and the app says which are
-  missing. A panel opens beside the region with what was read, laid back out into paragraphs.
-  On macOS anything the recogniser was unsure about is marked so you can correct it before
-  pasting — Windows reports no confidence scores, so nothing is marked there.
+- **Capture Text (OCR)** — recognise text in a region straight to the clipboard. A panel opens
+  beside the region with what was read, laid back out into paragraphs, and anything the
+  recogniser was unsure about marked so you can correct it before pasting. Offline, no API key.
+  Which engine reads it depends on the platform:
+  - **macOS** — Apple's Vision. Vietnamese and English out of the box, nothing to install.
+  - **Windows** — `Windows.Media.Ocr` for the languages Windows ships models for. It does
+    **not** ship one for Vietnamese, and it reports no confidence scores.
+  - **Vietnamese on Windows** needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki),
+    installed separately the way ffmpeg is. The app finds it on its own, adds its languages to
+    the picker, and takes over whenever one of them is selected — with per-word confidence, so
+    the uncertainty marking works again. Settings › Text says whether it was found.
 - **Screen recording** — full screen or a region, microphone or loopback audio, adjustable frame
   rate and cursor capture, with a floating stop bar and a live timer. Outputs `.mp4`.
 - **Annotation editor** — arrow, line, rectangle, ellipse, pen, highlighter, text,
@@ -183,10 +187,10 @@ The plain `npm run tauri build` above is the faster arm64-only build, for develo
 > **Untested.** The Rust source has Windows paths throughout — screen capture, recording via
 > `gdigrab`/`dshow`, reveal-in-Explorer — and the macOS-only dependencies are gated so they are
 > never compiled elsewhere. But nobody has built or run this on Windows, so treat it as a
-> starting point rather than a supported target. Text recognition does work on Windows, through
-> `Windows.Media.Ocr`, but it needs at least one language pack with the OCR feature installed —
-> Settings > Time & language > Language & region > a language's options > Optical character
-> recognition. Without one, the app says so rather than failing silently.
+> starting point rather than a supported target. Text recognition works, but read the OCR note
+> above first: Windows has no Vietnamese model, so Vietnamese needs Tesseract installed
+> alongside. Adding Vietnamese as a Windows *display* language does not add an OCR model for it
+> — those are two different lists that happen to look alike in Settings.
 
 Install, in this order:
 
@@ -224,7 +228,7 @@ shortcuts are the same `Ctrl+Shift+…` on both platforms.
 | Screenshot capture | Rust `xcap` |
 | Image encode/optimize | Rust `image`, `webp` (libwebp), `oxipng` |
 | Screen recording | system `ffmpeg` (avfoundation on macOS, gdigrab + dshow on Windows) |
-| Text recognition | OS engines: Apple Vision via `objc2-vision`, `Windows.Media.Ocr` via `windows` |
+| Text recognition | Apple Vision (`objc2-vision`), `Windows.Media.Ocr` (`windows`), optional system `tesseract` |
 | UI | React + TypeScript + Vite |
 | Shell | Tauri v2 |
 

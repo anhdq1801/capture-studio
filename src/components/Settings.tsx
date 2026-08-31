@@ -20,6 +20,7 @@ import {
   setClipboardText,
   listVideoCodecs,
   listOcrLanguages,
+  tesseractAvailable,
   OcrLanguage,
   LicenseStatus,
   getLicenseStatus,
@@ -46,6 +47,19 @@ import { Toggle } from "./Modal";
 import { QrCode } from "./QrCode";
 import { COMMERCE_ENABLED } from "../lib/features";
 import { isMac, isWindows } from "../lib/platform";
+
+/**
+ * Whether two BCP-47 tags name the same language, ignoring region.
+ *
+ * The settings file is shared across platforms but the recognisers are not, and they spell the
+ * same language differently: macOS Vision lists Vietnamese as `vi-VT`, Windows as `vi`. Compared
+ * whole, a saved `vi-VT` leaves the `vi` chip looking switched off while it is in fact the
+ * language in use — the picker would be describing a different setting from the one that runs.
+ */
+const sameLang = (a: string, b: string) =>
+  a.split(/[-_]/)[0].toLowerCase() === b.split(/[-_]/)[0].toLowerCase();
+
+const ocrLangOn = (saved: string[], id: string) => saved.some((l) => sameLang(l, id));
 import { DONATE_URL } from "../lib/links";
 
 /**
@@ -96,6 +110,7 @@ export function Settings({
   const [rec, setRec] = useState<AppSettings | null>(null);
   const [codecs, setCodecs] = useState<CodecOption[]>([]);
   const [ocrLangs, setOcrLangs] = useState<OcrLanguage[]>([]);
+  const [tessOk, setTessOk] = useState(true);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [screenPerm, setScreenPerm] = useState<boolean | null>(null);
   const [keyInput, setKeyInput] = useState("");
@@ -111,6 +126,7 @@ export function Settings({
     listVideoCodecs().then(setCodecs).catch(() => setCodecs([]));
     // Empty on a platform with no system recogniser, which hides the whole section.
     listOcrLanguages().then(setOcrLangs).catch(() => setOcrLangs([]));
+    tesseractAvailable().then(setTessOk).catch(() => setTessOk(false));
     getLicenseStatus().then(setLicense).catch(() => {});
     screenPermissionGranted().then(setScreenPerm).catch(() => setScreenPerm(true));
     // Prices come from the server; a build that shipped its own copy would keep quoting them
@@ -134,12 +150,18 @@ export function Settings({
 
   // Order matters to the recogniser, so a newly enabled language goes to the end of the
   // list rather than being re-sorted into the picker's own display order.
+  /** Re-ask both engines what they can do — after installing Tesseract, or adding a language. */
+  const reloadOcr = () => {
+    listOcrLanguages().then(setOcrLangs).catch(() => setOcrLangs([]));
+    tesseractAvailable().then(setTessOk).catch(() => setTessOk(false));
+  };
+
   const toggleOcrLang = (id: string) => {
     if (!rec) return;
-    const on = rec.ocrLanguages.includes(id);
+    const on = ocrLangOn(rec.ocrLanguages, id);
     saveRec({
       ocrLanguages: on
-        ? rec.ocrLanguages.filter((l) => l !== id)
+        ? rec.ocrLanguages.filter((l) => !sameLang(l, id))
         : [...rec.ocrLanguages, id],
     });
   };
@@ -604,7 +626,7 @@ export function Settings({
                   {ocrLangs.map((l) => (
                     <button
                       key={l.id}
-                      className={`chip ${rec.ocrLanguages.includes(l.id) ? "active" : ""}`}
+                      className={`chip ${ocrLangOn(rec.ocrLanguages, l.id) ? "active" : ""}`}
                       onClick={() => toggleOcrLang(l.id)}
                     >
                       {l.label}
@@ -614,8 +636,8 @@ export function Settings({
                 <div className="hint">
                   {isMac
                     ? "Pick every language you capture — the recogniser takes several at once and treats the order you switch them on as priority."
-                    : "Windows recognises one language at a time, so the first one switched on that this machine has a recogniser for is the one used. The list shows only what is installed — add more under Settings > Time & language > Language & region."}{" "}
-                  Recognition runs on this machine's own engine, offline, so nothing leaves it.
+                    : "Entries marked Tesseract are read by Tesseract, which takes several at once; the rest are read by the system engine, which takes one and uses the first you switched on. Picking any Tesseract language puts Tesseract in charge."}{" "}
+                  Recognition runs on this machine, offline, so nothing leaves it.
                 </div>
                 {rec.ocrLanguages.length === 0 && (
                   <div className="hint warn">
@@ -624,10 +646,12 @@ export function Settings({
                 )}
                 {!isMac && (
                   <div className="hint">
-                    Windows reports no confidence score for what it reads, so the panel cannot
-                    mark the lines worth double-checking the way it does on macOS.
+                    The system engine reports no confidence score, so with it the panel cannot
+                    mark the lines worth double-checking. Tesseract does score every word, and
+                    the marking comes back whenever it is the one reading.
                   </div>
                 )}
+                {!isMac && !tessOk && <TesseractMissing toast={toast} onFound={reloadOcr} />}
               </div>
             )}
           </>
@@ -836,6 +860,116 @@ export function Settings({
  * "Check again" exists because the install happens in another window; without it the only way
  * to clear this panel is to restart the app, which reads as the install having failed.
  */
+/**
+ * Offered when a language the user needs has no system recogniser behind it.
+ *
+ * Windows ships OCR models for a fixed list of languages and Vietnamese is not on it. Without
+ * Tesseract, a Vietnamese user on Windows gets the English recogniser guessing at every
+ * diacritic — text that looks like a broken font rather than an unsupported language, which is
+ * the worst of both: wrong, and wrong in a way that hides its own cause.
+ */
+function TesseractMissing({
+  toast,
+  onFound,
+}: {
+  toast: (t: string, k?: "ok" | "err" | "info") => void;
+  onFound: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+
+  // winget ships with Windows 10 and 11, so this needs nothing installed first.
+  const command = isWindows
+    ? "winget install UB-Mannheim.TesseractOCR"
+    : "sudo apt install tesseract-ocr tesseract-ocr-vie";
+
+  const recheck = async () => {
+    setChecking(true);
+    try {
+      if (await tesseractAvailable()) {
+        onFound();
+        toast("Tesseract found — its languages are in the list now");
+      } else {
+        toast("Still not finding it. Open a new terminal and check tesseract --version works.", "info");
+      }
+    } catch (e) {
+      toast(String(e), "err");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        background: "var(--bg-elev)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "12px 14px",
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>Missing a language?</div>
+      <div className="hint">
+        This machine&rsquo;s built-in recogniser only reads the languages listed above.
+        Vietnamese is not one Windows ships, so reading it needs Tesseract — a separate free
+        engine, installed once. Recognition stays offline either way.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+        <code
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflowX: "auto",
+            whiteSpace: "nowrap",
+            background: "var(--bg-elev-2)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }}
+        >
+          {command}
+        </code>
+        <button
+          className="btn sm"
+          onClick={() =>
+            setClipboardText(command)
+              .then(() => toast("Command copied"))
+              .catch((e) => toast(String(e), "err"))
+          }
+        >
+          Copy
+        </button>
+      </div>
+
+      {isWindows && (
+        <div className="hint" style={{ marginTop: 8 }}>
+          The installer asks which languages to add, under <em>Additional language data</em> —
+          tick the ones you need, since it installs English only by default. Already installed
+          without them? Re-run the installer and add them there.
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button className="btn sm" onClick={recheck} disabled={checking}>
+          {checking ? <i className="spin" /> : "Check again"}
+        </button>
+        <button
+          className="btn ghost sm"
+          onClick={() =>
+            openUrl("https://github.com/UB-Mannheim/tesseract/wiki").catch((e) =>
+              toast(String(e), "err")
+            )
+          }
+        >
+          Download page
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FfmpegMissing({
   toast,
   onFound,
