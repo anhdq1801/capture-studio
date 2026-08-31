@@ -344,10 +344,8 @@ mod winocr {
 #[cfg(not(target_os = "macos"))]
 mod tesseract {
     use super::{OcrLanguage, OcrLine, OcrResult};
-    use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
-    use std::sync::OnceLock;
 
     #[cfg(windows)]
     const EXE: &str = "tesseract.exe";
@@ -446,35 +444,37 @@ mod tesseract {
         None
     }
 
-    /// Cached: resolving spawns a process, and this is consulted on every recognition and every
-    /// time the settings panel opens.
-    pub fn path() -> Option<&'static PathBuf> {
-        static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
-        RESOLVED.get_or_init(resolve).as_ref()
+    /// Deliberately not cached.
+    ///
+    /// Tesseract is installed *while the app is running* — that is the whole flow the settings
+    /// panel walks the user through. A `OnceLock` here remembers "not installed" from startup
+    /// and never lets go, so "Check again" checks nothing and the only cure is a restart the
+    /// user has no reason to suspect. Resolving costs one process spawn against an OCR pass
+    /// that costs hundreds of milliseconds; the cache was never worth its own bug.
+    pub fn path() -> Option<PathBuf> {
+        resolve()
     }
 
     /// The traineddata files actually present. Installing tesseract does not install every
     /// language: on Windows the installer offers them as tick-boxes, and a user who did not
     /// tick Vietnamese has the binary but not the model.
+    /// Not cached either, and for the same reason: a language file dropped into `tessdata`
+    /// appears without reinstalling anything, so a remembered list goes stale the moment the
+    /// user does what the settings panel just told them to do.
     pub fn languages() -> Vec<String> {
-        static CACHED: OnceLock<Vec<String>> = OnceLock::new();
-        CACHED
-            .get_or_init(|| {
-                let Some(path) = path() else { return Vec::new() };
-                let Ok(out) = base(path).arg("--list-langs").output() else {
-                    return Vec::new();
-                };
-                // The first line is a header ("List of available languages...") and `osd` is
-                // an orientation-detection model, not a language anyone can pick.
-                String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .skip(1)
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty() && *l != "osd")
-                    .map(str::to_string)
-                    .collect()
-            })
-            .clone()
+        let Some(path) = path() else { return Vec::new() };
+        let Ok(out) = base(&path).arg("--list-langs").output() else {
+            return Vec::new();
+        };
+        // The first line is a header ("List of available languages...") and `osd` is an
+        // orientation-detection model, not a language anyone can pick.
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && *l != "osd")
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn options() -> Vec<OcrLanguage> {
@@ -573,6 +573,36 @@ mod tesseract {
         langs.iter().filter(|l| have.contains(l)).cloned().collect()
     }
 
+    /// A PNG on disk for the length of one recognition, removed however this function leaves.
+    struct TempPng {
+        path: PathBuf,
+    }
+
+    impl TempPng {
+        fn new(bytes: &[u8]) -> Result<Self, String> {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static N: AtomicU64 = AtomicU64::new(0);
+            // Process id and a counter rather than a random name: two captures in flight at
+            // once must not write over each other, and this needs no dependency to say so.
+            let path = std::env::temp_dir().join(format!(
+                "capture-studio-ocr-{}-{}.png",
+                std::process::id(),
+                N.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::write(&path, bytes)
+                .map_err(|e| format!("Could not stage the image for Tesseract: {e}"))?;
+            Ok(Self { path })
+        }
+    }
+
+    impl Drop for TempPng {
+        fn drop(&mut self) {
+            // Best effort: a leftover file in the temp directory is not worth failing a
+            // recognition that otherwise worked.
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     pub fn recognize(bytes: &[u8], langs: &[String]) -> Result<OcrResult, String> {
         let path = path().ok_or("Tesseract is not installed.")?;
         let picked = wanted(langs);
@@ -587,27 +617,31 @@ mod tesseract {
             .map_err(|e| e.to_string())?
             .1 as f32;
 
-        let mut child = base(path)
-            // `-` twice: read the image from stdin, write the result to stdout, so nothing
-            // touches the disk. `tsv` is the output mode, and has to come last.
-            .args(["-", "-", "-l", &picked.join("+"), "--psm", "3", "tsv"])
-            .stdin(Stdio::piped())
+        // Through a file rather than stdin. Handing a PNG to a child process on Windows means
+        // trusting that nothing in its C runtime treats the stream as text and rewrites every
+        // 0x0A byte it meets — which corrupts the image in a way that surfaces as "could not
+        // read that image", pointing at the picture instead of at the pipe. A temporary file
+        // has no such question hanging over it, and costs one write against an OCR pass
+        // measured in hundreds of milliseconds.
+        let scratch = TempPng::new(bytes)?;
+
+        let out = base(&path)
+            // `-` for the output: the result is text, which crosses a pipe safely. `tsv` is
+            // the output mode and has to come last.
+            .args([
+                scratch.path.as_os_str(),
+                "-".as_ref(),
+                "-l".as_ref(),
+                picked.join("+").as_ref(),
+                "--psm".as_ref(),
+                "3".as_ref(),
+                "tsv".as_ref(),
+            ])
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .output()
             .map_err(|e| format!("Could not run Tesseract: {e}"))?;
-
-        // Written from another thread: a screenshot is larger than the pipe buffer, so writing
-        // it all before starting to read deadlocks — tesseract blocks writing output that
-        // nobody is draining while we block writing input it is not reading.
-        let mut stdin = child.stdin.take().ok_or("Tesseract refused input")?;
-        let image = bytes.to_vec();
-        let writer = std::thread::spawn(move || stdin.write_all(&image));
-
-        let out = child
-            .wait_with_output()
-            .map_err(|e| format!("Tesseract failed: {e}"))?;
-        let _ = writer.join();
 
         if !out.status.success() {
             let why = String::from_utf8_lossy(&out.stderr);
