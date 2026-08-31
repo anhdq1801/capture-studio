@@ -651,7 +651,7 @@ export function Settings({
                     the marking comes back whenever it is the one reading.
                   </div>
                 )}
-                {!isMac && !tessOk && <TesseractMissing toast={toast} onFound={reloadOcr} />}
+                {!isMac && <TesseractHelp installed={tessOk} toast={toast} onFound={reloadOcr} />}
               </div>
             )}
           </>
@@ -861,17 +861,24 @@ export function Settings({
  * to clear this panel is to restart the app, which reads as the install having failed.
  */
 /**
- * Offered when a language the user needs has no system recogniser behind it.
+ * How to get a language the system recogniser does not have.
  *
  * Windows ships OCR models for a fixed list of languages and Vietnamese is not on it. Without
  * Tesseract, a Vietnamese user on Windows gets the English recogniser guessing at every
  * diacritic — text that looks like a broken font rather than an unsupported language, which is
  * the worst of both: wrong, and wrong in a way that hides its own cause.
+ *
+ * Shown whether or not Tesseract is installed, because installing it is only half the job: the
+ * installer adds English and nothing else unless asked, and `winget` runs it silently so the
+ * page that asks never appears. Hiding this once the binary is found leaves the user who most
+ * needs it — Tesseract present, their language absent — with nothing to read.
  */
-function TesseractMissing({
+function TesseractHelp({
+  installed,
   toast,
   onFound,
 }: {
+  installed: boolean;
   toast: (t: string, k?: "ok" | "err" | "info") => void;
   onFound: () => void;
 }) {
@@ -881,6 +888,13 @@ function TesseractMissing({
   const command = isWindows
     ? "winget install UB-Mannheim.TesseractOCR"
     : "sudo apt install tesseract-ocr tesseract-ocr-vie";
+
+  // Naming the program to open, not just the command. A command with no shell named is how a
+  // PowerShell line ends up pasted into Command Prompt, where it fails for reasons that look
+  // nothing like "wrong window".
+  const where = isWindows
+    ? "Press Win + X, choose Terminal (or Windows PowerShell), then paste this in:"
+    : "In a terminal:";
 
   const recheck = async () => {
     setChecking(true);
@@ -910,62 +924,98 @@ function TesseractMissing({
     >
       <div style={{ fontWeight: 600, marginBottom: 6 }}>Missing a language?</div>
       <div className="hint">
-        This machine&rsquo;s built-in recogniser only reads the languages listed above.
-        Vietnamese is not one Windows ships, so reading it needs Tesseract — a separate free
-        engine, installed once. Recognition stays offline either way.
+        {installed
+          ? "Tesseract is installed, but it only reads the languages whose data files are present — it adds English and nothing else unless asked. Vietnamese is not one Windows itself can read, so it has to come from here."
+          : "This machine’s built-in recogniser only reads the languages listed above. Vietnamese is not one Windows ships, so reading it needs Tesseract — a separate free engine, installed once. Recognition stays offline either way."}
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-        <code
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflowX: "auto",
-            whiteSpace: "nowrap",
-            background: "var(--bg-elev-2)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "8px 10px",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          }}
-        >
-          {command}
-        </code>
-        <button
-          className="btn sm"
-          onClick={() =>
-            setClipboardText(command)
-              .then(() => toast("Command copied"))
-              .catch((e) => toast(String(e), "err"))
-          }
-        >
-          Copy
-        </button>
-      </div>
-
-      {isWindows && (
-        <div className="hint" style={{ marginTop: 8 }}>
-          The installer asks which languages to add, under <em>Additional language data</em> —
-          tick the ones you need, since it installs English only by default. Already installed
-          without them? Re-run the installer and add them there.
-        </div>
+      {installed && isWindows ? (
+        <>
+          <div className="hint" style={{ marginTop: 10 }}>
+            The quickest fix is to drop the language file in beside the ones already there.
+            Download <code>vie.traineddata</code>, then put it in:
+          </div>
+          <Command
+            text={"C:\\Program Files\\Tesseract-OCR\\tessdata"}
+            toast={toast}
+          />
+          <div className="hint" style={{ marginTop: 8 }}>
+            Copying into that folder needs an administrator prompt — Windows will ask. Then come
+            back and press Check again. Re-running the installer and ticking Vietnamese under{" "}
+            <em>Additional language data</em> does the same thing.
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="hint" style={{ marginTop: 10 }}>{where}</div>
+          <Command text={command} toast={toast} />
+          {isWindows && (
+            <div className="hint" style={{ marginTop: 8 }}>
+              The installer asks which languages to add, under <em>Additional language data</em>{" "}
+              — tick the ones you need. Left alone it installs English only, and{" "}
+              <code>winget</code> runs it silently, so that page never appears: expect to add
+              Vietnamese yourself afterwards.
+            </div>
+          )}
+        </>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         <button className="btn sm" onClick={recheck} disabled={checking}>
           {checking ? <i className="spin" /> : "Check again"}
         </button>
         <button
           className="btn ghost sm"
           onClick={() =>
-            openUrl("https://github.com/UB-Mannheim/tesseract/wiki").catch((e) =>
-              toast(String(e), "err")
-            )
+            openUrl(
+              installed
+                ? "https://github.com/tesseract-ocr/tessdata/raw/main/vie.traineddata"
+                : "https://github.com/UB-Mannheim/tesseract/wiki"
+            ).catch((e) => toast(String(e), "err"))
           }
         >
-          Download page
+          {installed ? "Download vie.traineddata" : "Download page"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A command or path, monospaced, with the copy button that makes it usable. */
+function Command({
+  text,
+  toast,
+}: {
+  text: string;
+  toast: (t: string, k?: "ok" | "err" | "info") => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+      <code
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+          background: "var(--bg-elev-2)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: "8px 10px",
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }}
+      >
+        {text}
+      </code>
+      <button
+        className="btn sm"
+        onClick={() =>
+          setClipboardText(text)
+            .then(() => toast("Copied"))
+            .catch((e) => toast(String(e), "err"))
+        }
+      >
+        Copy
+      </button>
     </div>
   );
 }
@@ -982,6 +1032,14 @@ function FfmpegMissing({
   // winget ships with Windows 10 and 11, so it is the one route that needs nothing installed
   // first. The others are listed below rather than offered as the headline.
   const command = isMac ? "brew install ffmpeg" : "winget install ffmpeg";
+  // Which program to open, not just what to type. A line of shell with no shell named is how a
+  // PowerShell command ends up in Command Prompt, failing in a way that looks like a broken
+  // command rather than the wrong window.
+  const where = isMac
+    ? "Open Terminal (⌘Space, type Terminal), then paste this in:"
+    : isWindows
+      ? "Press Win + X, choose Terminal (or Windows PowerShell), then paste this in:"
+      : "In a terminal:";
   const alternatives = isMac
     ? "MacPorts (port install ffmpeg) works too, as does a build from ffmpeg.org."
     : isWindows
@@ -1012,33 +1070,8 @@ function FfmpegMissing({
         capture and the optimiser. Recording is the only feature that needs it.
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-        <code
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflowX: "auto",
-            whiteSpace: "nowrap",
-            background: "var(--bg-elev-2)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "8px 10px",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          }}
-        >
-          {command}
-        </code>
-        <button
-          className="btn sm"
-          onClick={() =>
-            setClipboardText(command)
-              .then(() => toast("Command copied"))
-              .catch((e) => toast(String(e), "err"))
-          }
-        >
-          Copy
-        </button>
-      </div>
+      <div className="hint" style={{ marginTop: 10 }}>{where}</div>
+      <Command text={command} toast={toast} />
 
       <div className="hint" style={{ marginTop: 8 }}>{alternatives}</div>
 
