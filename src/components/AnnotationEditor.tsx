@@ -115,7 +115,13 @@ export function AnnotationEditor({
     null
   );
   const [textValue, setTextValue] = useState("");
-  const [zoom, setZoom] = useState(100);
+  // Zoom as a fraction (1 = actual size) and owned here rather than read back off the DOM.
+  // It used to be whatever CSS `max-height` happened to produce, measured after the fact — which
+  // meant there was no way to change it, and no way to be sure a tall capture had been fitted
+  // rather than merely clipped.
+  const [zoom, setZoom] = useState(1);
+  /** While true the image re-fits itself when the window changes size. Any manual zoom ends it. */
+  const [fitMode, setFitMode] = useState(true);
   const [uploading, setUploading] = useState(false);
   const drawingRef = useRef(false);
 
@@ -230,6 +236,21 @@ export function AnnotationEditor({
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         undo();
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
+        // `=` as well as `+`: the key is unshifted on most layouts, and every other app treats
+        // ⌘= as zoom in. Requiring the shift would make the shortcut wrong everywhere it is
+        // muscle memory.
+        e.preventDefault();
+        stepZoom(1);
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === "-" || e.key === "_")) {
+        e.preventDefault();
+        stepZoom(-1);
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "0") {
+        e.preventDefault();
+        zoomToFit();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "1") {
+        e.preventDefault();
+        zoomActual();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
         // Deliberately taking ⌘C even when a shape is selected. There is no shape clipboard
         // to copy into, so the alternative is a shortcut that silently does nothing on the
@@ -273,17 +294,57 @@ export function AnnotationEditor({
     return () => cancelAnimationFrame(id);
   }, [editing]);
 
-  // Track displayed zoom %.
+  /** The largest zoom at which the whole image fits, never magnifying past actual size. */
+  const computeFit = useCallback(() => {
+    const wrap = wrapRef.current;
+    const c = canvasRef.current;
+    if (!wrap || !c || !c.width || !c.height) return 1;
+    const cs = getComputedStyle(wrap);
+    const availW =
+      wrap.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const availH =
+      wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    if (availW <= 0 || availH <= 0) return 1;
+    // Capped at 1: blowing a small capture up to fill the window makes it look worse and tells
+    // the user nothing they could not already see.
+    return Math.min(1, availW / c.width, availH / c.height);
+  }, []);
+
+  // Fit on open, and keep fitting while the window is resized — until the user takes over.
   useEffect(() => {
-    const measure = () => {
-      const c = canvasRef.current;
-      if (c && c.width) setZoom(Math.round((c.getBoundingClientRect().width / c.width) * 100));
+    if (!loaded) return;
+    const apply = () => {
+      if (fitMode) setZoom(computeFit());
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (canvasRef.current) ro.observe(canvasRef.current);
+    apply();
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(wrap);
     return () => ro.disconnect();
-  }, [loaded]);
+  }, [loaded, fitMode, computeFit]);
+
+  // A ladder rather than a multiplier, so the steps are the same every time and land on the
+  // round numbers people expect to see.
+  const ZOOM_STEPS = [0.1, 0.15, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
+
+  const stepZoom = useCallback((dir: 1 | -1) => {
+    setFitMode(false);
+    setZoom((z) => {
+      if (dir > 0) return ZOOM_STEPS.find((s) => s > z + 1e-4) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1];
+      return [...ZOOM_STEPS].reverse().find((s) => s < z - 1e-4) ?? ZOOM_STEPS[0];
+    });
+  }, []);
+
+  const zoomToFit = useCallback(() => {
+    setFitMode(true);
+    setZoom(computeFit());
+  }, [computeFit]);
+
+  const zoomActual = useCallback(() => {
+    setFitMode(false);
+    setZoom(1);
+  }, []);
 
   const toCanvas = (e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -614,7 +675,22 @@ export function AnnotationEditor({
             <span title="Image size">
               {item.width}×{item.height}
             </span>
-            <span title="Zoom">{zoom}%</span>
+          </div>
+
+          <div className="zoom-group">
+            <button className="zoom-btn" onClick={() => stepZoom(-1)} title="Zoom out (⌘−)">
+              &minus;
+            </button>
+            <button
+              className="zoom-level"
+              onClick={fitMode ? zoomActual : zoomToFit}
+              title={fitMode ? "Actual size (⌘1)" : "Fit to window (⌘0)"}
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button className="zoom-btn" onClick={() => stepZoom(1)} title="Zoom in (⌘+)">
+              +
+            </button>
           </div>
 
           <span className="tool-sep" />
@@ -662,6 +738,10 @@ export function AnnotationEditor({
             width={item.width || 1280}
             height={item.height || 800}
             style={{
+              // Explicit pixels rather than a CSS max-*: the size is the zoom, so zooming past
+              // the window has to overflow and scroll rather than being clamped back.
+              width: `${Math.round((item.width || 1280) * zoom)}px`,
+              height: `${Math.round((item.height || 800) * zoom)}px`,
               cursor:
                 tool === "text"
                   ? "text"

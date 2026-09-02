@@ -677,8 +677,12 @@ input[type="range"] {
 
 /* ---------- Detail ---------- */
 .detail-preview {
-  background: #0a0b0e
-    repeating-linear-gradient(45deg, #111318 0 12px, #0d0f13 12px 24px);
+  /* Measured against a real dark capture rather than guessed: a screenshot of an editor on a
+     dark theme averages about RGB(26,26,26), and the old backdrop sat at RGB(13,15,19) — close
+     enough that the picture and the space around it were the same colour. This sits well clear
+     of that range, so a dark capture reads as a shape rather than as more backdrop. */
+  background: #2b2f38
+    repeating-linear-gradient(45deg, #333845 0 12px, #2b2f38 12px 24px);
   border-radius: 10px;
   overflow: hidden;
   display: grid;
@@ -964,14 +968,29 @@ input[type="range"] {
   background: #0a0b0e
     repeating-linear-gradient(45deg, #111318 0 12px, #0d0f13 12px 24px);
   display: grid;
-  place-items: center;
+  /* `safe` matters more than `center` here. A centred item that outgrows its container
+     overflows equally in both directions, and the half that spills past the *start* edge
+     cannot be scrolled back to — so the top of a tall screenshot became unreachable, which
+     reads as the capture having lost it. `safe` keeps the centring while it fits and falls
+     back to start alignment the moment it does not, so the image always begins at the top and
+     scrolls downward. */
+  align-items: safe center;
+  justify-items: safe center;
   padding: 20px;
   min-height: 300px;
 }
 .edit-canvas-wrap canvas {
-  max-width: 100%;
-  max-height: 74vh;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  /* No max-width / max-height. The editor sets the pixel size from its own zoom, and a clamp
+     here would quietly cancel any zoom past the window edge — which is exactly when scrolling
+     is the point. */
+  /* An outline, not just a shadow. The backdrop is near-black and the shadow cast on it was
+     darker still, so a dark capture — a terminal, an IDE, anything on a dark theme — had no
+     visible edge at all. A tall one then read as a failed capture that had only caught the one
+     bright strip near the bottom, when in fact the whole image was on screen and simply
+     indistinguishable from the space around it. The border says where the picture ends. */
+  outline: 1px solid rgba(255, 255, 255, 0.22);
+  outline-offset: 0;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
 }
 
 .spin {
@@ -1325,11 +1344,8 @@ input[readonly] {
   border-radius: 0;
   box-shadow: none;
 }
-/* The modal capped the canvas against the viewport so the panel stayed inside the app window.
-   Here the panel *is* the window, so the canvas answers to its own row instead. */
-.editor-window .edit-canvas-wrap canvas {
-  max-height: 100%;
-}
+/* Nothing to override any more: the canvas is measured and sized by the editor itself, in both
+   the modal and the standalone window, so neither needs a viewport-relative cap. */
 /* Only ever seen if the editor window is showing without a capture, which means something
    failed — so it has to be readable and it has to offer a way out. */
 .editor-empty {
@@ -1461,4 +1477,41 @@ input[readonly] {
 }
 .link-btn:hover {
   text-decoration: underline;
+}
+
+/* ---- Zoom control ---- */
+.zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 10px;
+}
+.zoom-btn,
+.zoom-level {
+  height: 26px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.zoom-btn {
+  width: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+.zoom-level {
+  /* Fixed width so the toolbar does not shuffle sideways every time the number changes
+     between "39%" and "100%". */
+  min-width: 52px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.zoom-btn:hover,
+.zoom-level:hover {
+  background: var(--bg-elev);
+  border-color: var(--accent);
 }
