@@ -48,7 +48,9 @@ export function QrCode({
       shapeRendering="crispEdges"
       role="img"
       aria-label={title ?? value}
-      style={{ borderRadius: 8, display: "block" }}
+      // Shrinks with a narrow column instead of overflowing it; `size` is the size it wants,
+      // not a floor it insists on.
+      style={{ borderRadius: 8, display: "block", maxWidth: "100%", height: "auto" }}
     >
       <title>{title ?? value}</title>
       <rect width={span} height={span} fill="#ffffff" />

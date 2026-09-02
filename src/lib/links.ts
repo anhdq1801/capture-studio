@@ -26,3 +26,18 @@ export const BUY_URL = "https://example.com/capture-studio/license";
  *  is a question most people answer by closing the tab. Three dollars is roughly a coffee,
  *  which is what the text promises. Drop the `/3USD` to go back to an empty field. */
 export const DONATE_URL = "https://paypal.me/QuocAnhD/3USD?locale.x=en_US&country.x=VN";
+
+/** Bank transfer details behind the VietQR code, for the half of this app's users that PayPal
+ *  effectively locks out — opening a PayPal link in Vietnam means being asked to create an
+ *  account, and that is where most people stop. Every banking app there scans this. */
+export const DONATE_BANK = {
+  /** NAPAS bank identification number. Techcombank. */
+  bin: "970407",
+  account: "13823426974016",
+  holder: "DANG QUOC ANH",
+  bankName: "Techcombank",
+  /** Roughly what a coffee costs in Vietnam, and the local counterpart of the $3 above. */
+  amount: 50000,
+  /** No diacritics: the transfer description is not reliably read as UTF-8 by every bank. */
+  message: "Ung ho Capture Studio",
+} as const;

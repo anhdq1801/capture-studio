@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -48,6 +48,7 @@ import { QrCode } from "./QrCode";
 import { COMMERCE_ENABLED } from "../lib/features";
 import { getVersion } from "@tauri-apps/api/app";
 import { isMac, isWindows } from "../lib/platform";
+import { vietQrPayload } from "../lib/vietqr";
 
 /**
  * Whether two BCP-47 tags name the same language, ignoring region.
@@ -57,11 +58,25 @@ import { isMac, isWindows } from "../lib/platform";
  * whole, a saved `vi-VT` leaves the `vi` chip looking switched off while it is in fact the
  * language in use — the picker would be describing a different setting from the one that runs.
  */
+/**
+ * Does this machine's language suggest a Vietnamese bank transfer over PayPal?
+ *
+ * Read from the browser locale, which follows the system language. It decides which method
+ * opens first and nothing else — getting it wrong costs one click, so there is no need to be
+ * clever about it, and `navigator.languages` covers someone whose primary UI is English but
+ * who has Vietnamese listed after it.
+ */
+function prefersBankTransfer(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const tags = [navigator.language, ...(navigator.languages ?? [])];
+  return tags.some((t) => t?.toLowerCase().startsWith("vi"));
+}
+
 const sameLang = (a: string, b: string) =>
   a.split(/[-_]/)[0].toLowerCase() === b.split(/[-_]/)[0].toLowerCase();
 
 const ocrLangOn = (saved: string[], id: string) => saved.some((l) => sameLang(l, id));
-import { DONATE_URL } from "../lib/links";
+import { DONATE_BANK, DONATE_URL } from "../lib/links";
 
 /**
  * Settings used to be one long scroll. Splitting it means the thing you came to change is on
@@ -115,6 +130,21 @@ export function Settings({
   // Asked of the bundle rather than written here. It read "v0.1" through three releases,
   // because a number typed into a string has nothing keeping it honest.
   const [version, setVersion] = useState("");
+  // Which donation method leads. Read from the browser locale, which follows the system
+  // language: for a Vietnamese user a PayPal link is a dead end, and for everyone else a
+  // Vietnamese bank account is. Neither is hidden — this only picks which one opens.
+  const [payMethod, setPayMethod] = useState<"bank" | "paypal">(prefersBankTransfer() ? "bank" : "paypal");
+  // Encoded once: the account details are constants and the payload is pure.
+  const bankQr = useMemo(
+    () =>
+      vietQrPayload({
+        bin: DONATE_BANK.bin,
+        account: DONATE_BANK.account,
+        amount: DONATE_BANK.amount,
+        message: DONATE_BANK.message,
+      }),
+    []
+  );
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [screenPerm, setScreenPerm] = useState<boolean | null>(null);
   const [keyInput, setKeyInput] = useState("");
@@ -519,30 +549,98 @@ export function Settings({
                 >
                   {/* The QR is here so the phone in your hand can pay without the desktop having to
                       hand a link over to it — point the camera at the screen and that is the whole
-                      flow. The button covers the case where the browser is the easier route.
-                      Stacked, and large: side by side it had to share the width with the text and
+                      flow. Stacked and large: side by side it shared the width with the text and
                       came out too small for a phone camera to lock onto, which left the one thing
-                      it exists for not working. */}
-                  <QrCode value={DONATE_URL} size={232} title="Donate via PayPal" />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
-                    <div className="hint" style={{ marginTop: 0 }}>
-                      Capture Studio is free, with every feature included. If it saves you time,
-                      a coffee keeps it being worked on. Scan the code, or open PayPal below.
-                    </div>
-                    {/* Set apart from the paragraph above it on purpose. Buried in the grey run
-                        of text, the one line that answers "am I committing to $3?" read as more
-                        blurb and went unread — which leaves a suggested amount looking like a
-                        price. */}
-                    <div className="donate-note">$3 is only a suggestion — you can change it on the PayPal page.</div>
+                      it exists for not working.
+
+                      Two methods, because PayPal effectively locks out the people this app is
+                      mostly written for: opening that link in Vietnam asks you to create an
+                      account, and that is where most of them stop. The bank code is the thing
+                      they already use daily. Which one leads is decided by the system language,
+                      but both stay one click away — a Vietnamese speaker abroad and an English
+                      one in Hanoi both exist. */}
+                  <div className="seg sm" role="tablist" aria-label="Donation method">
                     <button
-                      className="btn sm"
-                      style={{ marginTop: 10 }}
-                      onClick={() => openUrl(DONATE_URL).catch((e) => toast(String(e), "err"))}
+                      role="tab"
+                      aria-selected={payMethod === "bank"}
+                      className={payMethod === "bank" ? "active" : ""}
+                      onClick={() => setPayMethod("bank")}
                     >
-                      Donate with PayPal
+                      Bank transfer
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={payMethod === "paypal"}
+                      className={payMethod === "paypal" ? "active" : ""}
+                      onClick={() => setPayMethod("paypal")}
+                    >
+                      PayPal
                     </button>
                   </div>
+
+                  {payMethod === "bank" ? (
+                    <>
+                      {/* Error correction "L" rather than "M". A bank payload is twice the length
+                          of the PayPal link, and at "M" it needs 49 modules against 41 — which at
+                          this size is back under the pixels-per-module a phone camera needs. The
+                          redundancy "M" buys is for print that gets creased and dirty; this is a
+                          clean screen. */}
+                      <QrCode value={bankQr} size={288} ecc="L" title="Bank transfer QR" />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
+                        <div className="hint" style={{ marginTop: 0 }}>
+                          Capture Studio is free, with every feature included. If it saves you
+                          time, a coffee keeps it being worked on. Scan with any Vietnamese
+                          banking app — no account to create anywhere.
+                        </div>
+                        <div className="donate-note">
+                          50.000₫ is only a suggestion — you can change it in your banking app.
+                        </div>
+                        <div className="hint" style={{ marginTop: 10, fontVariantNumeric: "tabular-nums" }}>
+                          {DONATE_BANK.bankName} · {DONATE_BANK.holder}
+                          <br />
+                          {DONATE_BANK.account}
+                        </div>
+                        <button
+                          className="btn sm"
+                          style={{ marginTop: 10 }}
+                          onClick={() =>
+                            setClipboardText(DONATE_BANK.account)
+                              .then(() => toast("Account number copied"))
+                              .catch((e) => toast(String(e), "err"))
+                          }
+                        >
+                          Copy account number
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <QrCode value={DONATE_URL} size={288} title="Donate via PayPal" />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
+                        <div className="hint" style={{ marginTop: 0 }}>
+                          Capture Studio is free, with every feature included. If it saves you
+                          time, a coffee keeps it being worked on. Scan the code, or open PayPal
+                          below.
+                        </div>
+                        {/* Set apart from the paragraph above it on purpose. Buried in the grey
+                            run of text, the one line that answers "am I committing to $3?" read
+                            as more blurb and went unread — which leaves a suggested amount
+                            looking like a price. */}
+                        <div className="donate-note">
+                          $3 is only a suggestion — you can change it on the PayPal page.
+                        </div>
+                        <button
+                          className="btn sm"
+                          style={{ marginTop: 10 }}
+                          onClick={() => openUrl(DONATE_URL).catch((e) => toast(String(e), "err"))}
+                        >
+                          Donate with PayPal
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </aside>

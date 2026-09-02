@@ -1555,3 +1555,10 @@ input[readonly] {
   line-height: 1.45;
   color: var(--accent-hi);
 }
+
+/* The donate card's method switch: the same segmented control as the settings tabs, at the
+   size a 300px column can carry. */
+.seg.sm button {
+  font-size: 12px;
+  padding: 4px 12px;
+}
