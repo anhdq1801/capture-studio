@@ -46,6 +46,7 @@ import { ShortcutRecorder } from "./ShortcutRecorder";
 import { Toggle } from "./Modal";
 import { QrCode } from "./QrCode";
 import { COMMERCE_ENABLED } from "../lib/features";
+import { getVersion } from "@tauri-apps/api/app";
 import { isMac, isWindows } from "../lib/platform";
 
 /**
@@ -111,6 +112,9 @@ export function Settings({
   const [codecs, setCodecs] = useState<CodecOption[]>([]);
   const [ocrLangs, setOcrLangs] = useState<OcrLanguage[]>([]);
   const [tessOk, setTessOk] = useState(true);
+  // Asked of the bundle rather than written here. It read "v0.1" through three releases,
+  // because a number typed into a string has nothing keeping it honest.
+  const [version, setVersion] = useState("");
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [screenPerm, setScreenPerm] = useState<boolean | null>(null);
   const [keyInput, setKeyInput] = useState("");
@@ -127,6 +131,7 @@ export function Settings({
     // Empty on a platform with no system recogniser, which hides the whole section.
     listOcrLanguages().then(setOcrLangs).catch(() => setOcrLangs([]));
     tesseractAvailable().then(setTessOk).catch(() => setTessOk(false));
+    getVersion().then(setVersion).catch(() => {});
     getLicenseStatus().then(setLicense).catch(() => {});
     screenPermissionGranted().then(setScreenPerm).catch(() => setScreenPerm(true));
     // Prices come from the server; a build that shipped its own copy would keep quoting them
@@ -332,9 +337,10 @@ export function Settings({
           ))}
         </div>
       </div>
-      <div className="content" style={{ maxWidth: 720 }}>
+      <div className="content" style={{ maxWidth: tab === "general" ? 1140 : 720 }}>
         {tab === "general" && (
-          <>
+          <div className="settings-cols">
+            <div className="settings-main">
         <div className="field">
           <label>Screen Recording permission</label>
           <div
@@ -488,42 +494,59 @@ export function Settings({
             ))}
           </div>
         </div>
-        <div className="field">
-          <label>Support Capture Studio</label>
-          <div
-            className="box"
-            style={{
-              display: "flex",
-              gap: 16,
-              alignItems: "center",
-              background: "var(--bg-elev)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              padding: "14px 16px",
-            }}
-          >
-            {/* The QR is here so the phone in your hand can pay without the desktop having to
-                hand a link over to it — point the camera at the screen and that is the whole
-                flow. The button covers the case where the browser is the easier route. */}
-            <QrCode value={DONATE_URL} size={180} title="Donate via PayPal" />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
-              <div className="hint" style={{ marginTop: 0 }}>
-                Capture Studio is free, with every feature included. If it saves you time,
-                a coffee keeps it being worked on. Scan the code with your phone, or open
-                PayPal here.
-              </div>
-              <button
-                className="btn sm"
-                style={{ marginTop: 10 }}
-                onClick={() => openUrl(DONATE_URL).catch((e) => toast(String(e), "err"))}
-              >
-                Donate with PayPal
-              </button>
+
             </div>
+
+            {/* Kept beside the settings rather than under them: at the bottom of a long
+                scroll it was the one thing nobody reached, while the space it needed was
+                sitting empty the whole way down. */}
+            <aside className="settings-aside">
+        <div className="field">
+                <label>Support Capture Studio</label>
+                <div
+                  className="box"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 12,
+                    background: "var(--bg-elev)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    padding: "16px",
+                    textAlign: "center",
+                  }}
+                >
+                  {/* The QR is here so the phone in your hand can pay without the desktop having to
+                      hand a link over to it — point the camera at the screen and that is the whole
+                      flow. The button covers the case where the browser is the easier route.
+                      Stacked, and large: side by side it had to share the width with the text and
+                      came out too small for a phone camera to lock onto, which left the one thing
+                      it exists for not working. */}
+                  <QrCode value={DONATE_URL} size={232} title="Donate via PayPal" />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ marginBottom: 4 }}>Buy the author a cup of coffee ☕</div>
+                    <div className="hint" style={{ marginTop: 0 }}>
+                      Capture Studio is free, with every feature included. If it saves you time,
+                      a coffee keeps it being worked on. Scan the code, or open PayPal below.
+                    </div>
+                    {/* Set apart from the paragraph above it on purpose. Buried in the grey run
+                        of text, the one line that answers "am I committing to $3?" read as more
+                        blurb and went unread — which leaves a suggested amount looking like a
+                        price. */}
+                    <div className="donate-note">$3 is only a suggestion — you can change it on the PayPal page.</div>
+                    <button
+                      className="btn sm"
+                      style={{ marginTop: 10 }}
+                      onClick={() => openUrl(DONATE_URL).catch((e) => toast(String(e), "err"))}
+                    >
+                      Donate with PayPal
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
-        </div>
-          </>
         )}
 
         {tab === "recording" && (
@@ -842,7 +865,7 @@ export function Settings({
         )}
 
         <div className="hint" style={{ marginTop: 24 }}>
-          Capture Studio v0.1 · Tauri + Rust · cross-platform (macOS & Windows)
+          Capture Studio {version ? `v${version}` : ""} · Tauri + Rust · cross-platform (macOS &amp; Windows)
         </div>
       </div>
     </>

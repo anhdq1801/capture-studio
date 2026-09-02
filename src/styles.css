@@ -1515,3 +1515,43 @@ input[readonly] {
   background: var(--bg-elev);
   border-color: var(--accent);
 }
+
+/* ---- Settings: two columns where there is room ---- */
+.settings-cols {
+  display: grid;
+  /* The main column keeps the reading width it always had; the aside takes what is left over
+     rather than the settings stretching to fill it. Long option labels are hard to scan across
+     a full window, which is why the 720px cap exists in the first place. */
+  grid-template-columns: minmax(0, 720px) minmax(240px, 340px);
+  gap: 28px;
+  align-items: start;
+}
+.settings-aside {
+  /* Stays put while the settings scroll past. It is the one thing here nobody is looking for,
+     so it has to be where they are rather than at the end of a scroll they never finish. */
+  position: sticky;
+  top: 4px;
+}
+.settings-aside .field {
+  margin-top: 0;
+}
+/* Below this the two columns would each be too narrow to read, so they stack — the aside going
+   back under the settings, which is where it was before. */
+@media (max-width: 1150px) {
+  .settings-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-aside {
+    position: static;
+  }
+}
+
+/* The line that says the amount is not fixed. Italic and in the accent tint rather than the
+   hint grey: it has to read as an aside about the number, not as another sentence of blurb. */
+.donate-note {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--accent-hi);
+}
