@@ -163,7 +163,7 @@ the stapled app inside is ever reached. Submit it separately:
 cd src-tauri/target/universal-apple-darwin/release/bundle/dmg
 # Named once rather than twice, so a version bump does not leave one of these two lines
 # pointing at a file that is no longer there.
-dmg="Capture Studio_1.2.0_universal.dmg"
+dmg="Capture Studio_1.3.0_universal.dmg"
 xcrun notarytool submit "$dmg" --keychain-profile "<profile>" --wait
 xcrun stapler staple "$dmg"
 ```
