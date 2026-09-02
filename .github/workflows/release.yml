@@ -2,13 +2,16 @@ name: Release
 
 # Builds the Windows installer (.msi/.exe) and attaches it to a draft GitHub
 # Release. macOS builds are NOT done here — build those locally on your Mac
-# with `npm run tauri build` (faster, and free — no need to burn Actions
-# minutes on a runner you already have on your desk). Windows is the one
+# with `npm run tauri build` — faster than a runner, and the signing certificate
+# lives in that machine's keychain anyway. Windows is the one
 # platform you don't have a machine for, so that's the only one CI builds.
 #
-# Only triggers on a version tag or manual dispatch — never on every push —
-# since that Actions-minute quota is shared across all your repos (including
-# AltaVn).
+# Only triggers on a version tag or manual dispatch, never on every push. Not for billing
+# reasons: this repository is public, and Actions is free without a minute limit on public
+# repositories, so these builds cost nothing and take nothing from the private repos on the
+# same account. (That was not true while this repo was private, which is what the note here
+# used to say.) The trigger stays narrow because a twelve-minute Windows build on every push
+# is noise — the only concurrency the account really shares is the cap on simultaneous jobs.
 
 on:
   push:
