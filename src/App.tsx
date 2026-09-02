@@ -33,6 +33,7 @@ import { loadShortcuts } from "./lib/shortcuts";
 import { BUY_URL } from "./lib/links";
 import { COMMERCE_ENABLED } from "./lib/features";
 import { openEditorWindow } from "./lib/editorwindow";
+import { hideOwnWindows, showOwnWindows } from "./lib/ownwindows";
 import { openStopBar, closeStopBar } from "./lib/stopbar";
 import { openScrollBar, closeScrollBar } from "./lib/scrollbar";
 import { hideRegionHint } from "./lib/regionhint";
@@ -178,6 +179,16 @@ export default function App() {
     setLicense((l) => (l ? { ...l, shouldNudge: false } : l));
   }, []);
 
+  /** Our own windows taken off screen for the current capture, so only those are put back. */
+  const hiddenForCapture = useRef<string[]>([]);
+
+  /** Puts back the editor / text panel, skipping whichever is about to show new content. */
+  const restoreOwnWindows = useCallback(async (except?: string) => {
+    const labels = hiddenForCapture.current;
+    hiddenForCapture.current = [];
+    await showOwnWindows(labels, except).catch(() => {});
+  }, []);
+
   const restoreAfterCapture = useCallback(async (focus: boolean) => {
     if (!hidForCapture.current) return;
     hidForCapture.current = false;
@@ -197,13 +208,14 @@ export default function App() {
   const openEditorForCapture = useCallback(
     async (item: MediaItem) => {
       await restoreAfterCapture(false);
+      await restoreOwnWindows("editor");
       try {
         await openEditorWindow(item);
       } catch (e) {
         toast(String(e), "err");
       }
     },
-    [restoreAfterCapture, toast]
+    [restoreAfterCapture, restoreOwnWindows, toast]
   );
 
   // The region overlay notifies us when a screenshot was captured.
@@ -215,12 +227,13 @@ export default function App() {
     const unErr = listen<string>("capture-error", (e) => {
       toast(e.payload, "err");
       restoreAfterCapture(true);
+      restoreOwnWindows();
     });
     return () => {
       un.then((f) => f());
       unErr.then((f) => f());
     };
-  }, [reload, toast, openEditorForCapture, restoreAfterCapture]);
+  }, [reload, toast, openEditorForCapture, restoreAfterCapture, restoreOwnWindows]);
 
   const primaryMonitorId =
     monitors.find((m) => m.isPrimary)?.id ?? monitors[0]?.id ?? null;
@@ -326,6 +339,9 @@ export default function App() {
       setBusy("capture");
       try {
         await win.hide();
+        hiddenForCapture.current = [
+          ...new Set([...hiddenForCapture.current, ...(await hideOwnWindows())]),
+        ];
         await new Promise((r) => setTimeout(r, 320));
         const item = await captureMonitor(monitorId ?? undefined);
         await reload();
@@ -334,12 +350,13 @@ export default function App() {
         toast(String(e), "err");
         await win.show();
         await win.setFocus();
+        await restoreOwnWindows();
       } finally {
         busyRef.current = false;
         setBusy(null);
       }
     },
-    [reload, toast, openEditorForCapture, ensureScreenAccess]
+    [reload, toast, openEditorForCapture, restoreOwnWindows, ensureScreenAccess]
   );
 
   // Opening the overlay can take a moment on first use; without a busy state these three
@@ -349,7 +366,11 @@ export default function App() {
       // Checked before the overlay rather than after the drag: sending someone through a
       // crosshair selection only to hand them a slice of wallpaper is the exact failure this
       // gate exists to prevent.
+      // Same re-entry guard `captureFull` has. Two overlays opening at once left the second
+      // one confused about what the first had already hidden.
+      if (busyRef.current) return;
       if (!(await ensureScreenAccess())) return;
+      busyRef.current = true;
       setBusy("capture");
       try {
         const win = getCurrentWindow();
@@ -371,22 +392,38 @@ export default function App() {
         // once criticised for was grabbing the screen, not hiding a window.
         const wasVisible = pick !== "window" && (await win.isVisible());
         if (wasVisible) await win.hide();
-        hidForCapture.current = wasVisible;
+        // Not assigned: OR-ed. A second capture started while the first is still open finds
+        // the window already hidden, so `wasVisible` is false — and a plain assignment threw
+        // away the fact that we were the ones who hid it. The window then never came back and
+        // the app looked as though it had crashed, while in fact it was still running with
+        // nothing on screen.
+        hidForCapture.current = hidForCapture.current || wasVisible;
+        // The editor and text panel are windows of their own and would otherwise be captured
+        // along with whatever is behind them. Window-picking is exempt for the same reason the
+        // main window is: that path grabs a named window and needs it on screen.
+        if (pick !== "window") {
+          hiddenForCapture.current = [
+            ...new Set([...hiddenForCapture.current, ...(await hideOwnWindows())]),
+          ];
+        }
         await openRegionOverlay(mode, monitors, pick);
       } catch (e) {
         toast(String(e), "err");
         await restoreAfterCapture(true);
+        await restoreOwnWindows();
       } finally {
+        busyRef.current = false;
         setBusy(null);
       }
     },
-    [monitors, toast, restoreAfterCapture, ensureScreenAccess]
+    [monitors, toast, restoreAfterCapture, restoreOwnWindows, ensureScreenAccess]
   );
 
   // Nothing was captured, so nothing else is going to bring the window back.
   useEffect(() => {
     const un = listen<{ reason?: string } | null>("overlay-cancelled", (e) => {
       restoreAfterCapture(true);
+      restoreOwnWindows();
       // Escape is the user saying no, and needs no commentary. The rest are cases where
       // someone tried to capture and got nothing, which was previously indistinguishable
       // from the app being broken.
@@ -404,7 +441,7 @@ export default function App() {
     return () => {
       un.then((f) => f());
     };
-  }, [restoreAfterCapture]);
+  }, [restoreAfterCapture, restoreOwnWindows]);
 
   const captureRegion = useCallback(() => openOverlay("shot", "area"), [openOverlay]);
   const captureWindowPick = useCallback(() => openOverlay("shot", "window"), [openOverlay]);
@@ -531,6 +568,9 @@ export default function App() {
       const monitor = monitors.find((m) => m.id === monitorId) ?? null;
       try {
         await getCurrentWindow().hide();
+        hiddenForCapture.current = [
+          ...new Set([...hiddenForCapture.current, ...(await hideOwnWindows())]),
+        ];
         await scrollStart(monitorId, rect[0], rect[1], rect[2], rect[3]);
         await openScrollBar(monitor, rect);
         toast("Scroll the content — press Done when finished", "info");
@@ -540,6 +580,7 @@ export default function App() {
         const win = getCurrentWindow();
         await win.show();
         await win.setFocus();
+        await restoreOwnWindows();
       }
     });
 
@@ -563,6 +604,7 @@ export default function App() {
       const win = getCurrentWindow();
       await win.show();
       await win.setFocus();
+      await restoreOwnWindows();
     });
 
     return () => {
@@ -570,7 +612,7 @@ export default function App() {
       unFinish.then((f) => f());
       unCancel.then((f) => f());
     };
-  }, [monitors, reload, toast, openEditorForCapture]);
+  }, [monitors, reload, toast, openEditorForCapture, restoreOwnWindows]);
 
   // ---- Capture Text ----
   // The overlay picks the area; the text goes on the clipboard and nothing reaches the
@@ -602,12 +644,15 @@ export default function App() {
         // without focus deliberately: the text just went on the clipboard and the next thing
         // the user does is paste it into whatever they were reading.
         await restoreAfterCapture(false);
+        // The text panel is excluded: `openTextPanel` closes and reopens it with the new
+        // reading, and putting the previous one back first would show the wrong text.
+        await restoreOwnWindows("textpanel");
       }
     });
     return () => {
       un.then((f) => f());
     };
-  }, [toast, restoreAfterCapture]);
+  }, [toast, restoreAfterCapture, restoreOwnWindows]);
 
   // The editor runs in its own window, so anything it does that the app is showing has to come
   // back over an event — there is no shared React tree left to update.
