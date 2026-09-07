@@ -8,9 +8,14 @@
 ## 1. What this app is
 
 A **cross-platform (macOS + Windows) desktop app** for:
-- **Screenshots** — full display, a chosen monitor, or a drag-selected region.
+- **Screenshots** — full display, a chosen monitor, a drag-selected region, a picked window, a
+  scrolling capture, or **several regions of one display at once** (§13).
+- **Text recognition (OCR)** — read text off a region or a library image. macOS Vision;
+  `Windows.Media.Ocr` on Windows, with **Tesseract** for the languages it ships no model for —
+  Vietnamese among them (§14).
 - **Annotation / notes** — a Shottr-style image editor (arrows, shapes, pen, highlighter, text, step-numbers, blur/redact) plus a free-text note per capture.
-- **Screen recording (advanced)** — full screen or region, mic/loopback audio, fps, cursor, start/stop.
+- **Screen recording (advanced)** — full screen or region, mic/loopback audio, fps, cursor,
+  start/stop, and an optional **zoom-to-cursor** pass over the finished video (§13).
 - **Image size optimization** — re-encode to WebP/JPEG/PNG with quality + max-width, before/after comparison.
 - **Menu-bar app** — tray icon with quick actions and **global keyboard shortcuts**, close-to-tray.
 - **Upload to Cloud (opt-in, paid)** — per-item, uploads to Cloudflare R2 via a presigned URL and
@@ -70,8 +75,9 @@ differences), but *producing* both `.dmg`/`.app` and `.msi`/`.exe` requires buil
 Dev machine is a Mac, so **macOS builds/checks are done locally** — `npm run tauri build` for a
 `.dmg`, `npx tsc --noEmit` / `cd src-tauri && cargo check` to verify. **CI (`.github/workflows/`,
 assumes this `capture-studio/` directory is the git repo root) exists only for Windows**, the one
-platform with no local machine available, and is **manual/on-demand only** (no push/PR triggers) —
-that Actions-minute quota is shared across every repo on the account (including AltaVn):
+platform with no local machine available, and is **manual/on-demand only** (no push/PR triggers).
+(Actions minutes are **free and unlimited for public repositories**, so these builds cost the
+account's private repos nothing; only the 20-concurrent-job limit is shared.)
 - **`ci.yml`** — run manually (Actions tab or `gh workflow run ci.yml`) to verify `cargo check` +
   `tsc --noEmit` on `windows-latest`. This is what actually proves the `#[cfg(target_os =
   "windows")]` code paths compile — a local `cargo check` on the Mac never touches them.
@@ -88,50 +94,48 @@ To use: `git init` this directory (if not already), push to a GitHub repo, then
 
 ```
 capture-studio/
-├── index.html                 # main window entry (loads src/main.tsx)
-├── overlay.html               # region-selector window entry (loads src/overlay.tsx)
-├── stopbar.html                # floating recording-control window entry (loads src/stopbar.tsx)
-├── vite.config.ts             # multi-page: inputs { main, overlay, stopbar }
+├── index.html  overlay.html  stopbar.html  editor.html  scrollbar.html
+├── regionhint.html  textpanel.html      # one entry per window; all inputs in vite.config.ts
 ├── src/
-│   ├── main.tsx               # React root for main window
-│   ├── App.tsx                # ORCHESTRATOR: state, tray-action listener, capture flows, recording lifecycle
-│   ├── overlay.tsx            # region selector UI (freeze-frame + drag), its own React root
-│   ├── stopbar.tsx            # small always-on-top timer + stop button, its own React root
+│   ├── App.tsx                # ORCHESTRATOR: state, tray-action listener, capture flows, recording
+│   ├── overlay.tsx            # region selector — single, multi-region (§13), window pick
+│   ├── editor.tsx             # React root for the annotation editor's own window
+│   ├── stopbar.tsx  scrollbar.tsx  regionhint.tsx  textpanel.tsx
 │   ├── styles.css             # ALL styles (dark theme, tokens as CSS vars). No CSS modules.
 │   ├── lib/
-│   │   ├── api.ts             # typed wrappers around every Rust command + types + itemSrc()
-│   │   ├── overlay.ts         # openRegionOverlay(mode, monitorId) → creates WebviewWindow
-│   │   ├── stopbar.ts         # openStopBar(since) / closeStopBar() → creates/closes the "stopbar" WebviewWindow
-│   │   └── format.ts          # formatBytes / formatDuration / percentSaved
-│   └── components/
-│       ├── Sidebar.tsx        # left nav + capture/import buttons
-│       ├── Gallery.tsx        # grid of MediaItem cards (async thumbnail via itemSrc)
-│       ├── DetailModal.tsx    # per-item preview, note editor, actions
-│       ├── AnnotationEditor.tsx  # Shottr-style canvas editor (big file)
-│       ├── EditIcons.tsx      # inline SVG icon set for the editor toolbar
-│       ├── OptimizeModal.tsx  # image optimization UI + before/after
-│       ├── RecordModal.tsx    # device pick, region, fps, start/stop timer
-│       ├── Settings.tsx       # library dir, ffmpeg status, autostart, shortcuts, displays, Account & Cloud Upload
-│       ├── AccountModal.tsx   # login/signup form
-│       └── Toasts.tsx         # transient notifications
+│   │   ├── api.ts             # typed wrapper per Rust command + types + itemSrc()
+│   │   ├── actions.ts         # ACTIONS: one label/icon/shortcut-id per capture action
+│   │   ├── shortcuts.ts       # mirror of settings::SHORTCUTS + a live store
+│   │   ├── overlay.ts         # one overlay WebviewWindow per display, kept warm
+│   │   ├── ownwindows.ts      # hide/show our own windows so they stay out of captures
+│   │   ├── editorwindow.ts  stopbar.ts  scrollbar.ts  regionhint.ts  textpanel.ts
+│   │   ├── platform.ts        # isMac / isWindows
+│   │   ├── features.ts        # COMMERCE_ENABLED — the cloud/licence kill switch
+│   │   ├── links.ts           # every outward link, incl. donate + bug report
+│   │   ├── vietqr.ts  qr.ts   # EMVCo/NAPAS payload + the QR renderer for it
+│   │   ├── beautify.ts  paragraphs.ts  format.ts
+│   └── components/            # Sidebar, Gallery, DetailModal, AnnotationEditor, EditIcons,
+│                              # Icons, OptimizeModal, Optimizer, BeautifyModal, RecordModal,
+│                              # Settings, ShortcutRecorder, AccountModal, LicenseBar, QrCode,
+│                              # Modal, Toasts
 ├── src-tauri/
 │   ├── tauri.conf.json        # window, macOSPrivateApi, assetProtocol scope
-│   ├── capabilities/default.json  # permissions (windows: main + overlay + stopbar)
+│   ├── capabilities/default.json  # permissions; `windows` must list every label
+│   ├── icons/menu/            # tray glyphs, drawn by make_icons.py (light + dark sets)
 │   └── src/
-│       ├── lib.rs             # run(): plugins, state, tray menu, global shortcuts, commands
-│       ├── main.rs            # calls capture_studio_lib::run()
-│       ├── models.rs          # serde structs (camelCase to JS)
-│       ├── library.rs         # Library index (library.json) + MediaItem CRUD on disk
-│       ├── capture.rs         # screenshots, region, grab_screen, import_*, clipboard, annotated
-│       ├── optimize.rs        # optimize_image
-│       ├── recorder.rs        # ffmpeg control: devices, start/stop, session state, video posters
-│       ├── ocr.rs             # text recognition on the OS engine (macOS Vision) — offline
-│       ├── license.rs         # offline Ed25519 licence keys + the once-a-week reminder
-│       └── cloud.rs           # HTTP client for server/: auth, billing, presigned upload (§11)
-└── server/                    # Cloudflare Worker backend for cloud upload — see server/README.md
-    ├── wrangler.toml
-    ├── migrations/0001_init.sql
-    └── src/                   # index.ts, auth.ts, account.ts, upload.ts, paypal.ts, payos.ts, pricing.ts, db.ts
+│       ├── lib.rs             # run(): plugins, state, tray menu, shortcuts, invoke_handler
+│       ├── models.rs          # serde structs (camelCase to JS), incl. AppSettings
+│       ├── settings.rs        # settings.json + the SHORTCUTS table
+│       ├── library.rs         # library.json index + MediaItem CRUD on disk
+│       ├── capture.rs         # screenshots, region, multi-region (§13), windows, clipboard
+│       ├── scroll.rs          # scrolling capture session + stitching
+│       ├── optimize.rs        # single + batch re-encode
+│       ├── recorder.rs        # ffmpeg control, codecs, thumbnails, zoom-to-cursor (§13)
+│       ├── ocr.rs             # Vision / Windows.Media.Ocr / Tesseract (§14)
+│       ├── permissions.rs     # macOS Screen Recording: check, request, open Settings, restart
+│       ├── license.rs         # offline Ed25519 licence keys + the weekly reminder
+│       └── cloud.rs           # HTTP client for server/ (§11) — the only networked module
+└── server/                    # Cloudflare Worker backend for cloud upload — see its README
 ```
 
 ---
@@ -164,6 +168,18 @@ capture-studio/
 | `list_monitors` | capture.rs | enumerate displays |
 | `capture_monitor(monitorId?)` | capture.rs | full-monitor screenshot → MediaItem |
 | `capture_region(monitorId?, x,y,w,h)` | capture.rs | crop a monitor capture (physical px) |
+| `capture_regions(monitorId?, rects, combine)` | capture.rs | **one** grab, N crops → N items, or one stitched sheet (§13) |
+| `capture_all_monitors()` | capture.rs | every display in one image, at their real desktop positions |
+| `copy_item(id)` | capture.rs | a library item onto the clipboard, read from disk rather than shipped as base64 |
+| `trim_video(id, startMs, endMs, replace)` | recorder.rs | frame-accurate cut; re-encodes on purpose (§13) |
+| `capture_window(windowId)` / `list_windows` | capture.rs | per-window grab, follows the window's real shape |
+| `keep_item(id)` | capture.rs | commit a draft without re-encoding it through the canvas |
+| `scroll_start` / `scroll_step` / `scroll_finish` / `scroll_cancel` | scroll.rs | scrolling-capture session |
+| `scan_images` / `optimize_files` | optimize.rs | batch optimiser over a folder |
+| `screen_permission_granted` / `request_screen_permission` / `open_screen_permission_settings` / `restart_app` | permissions.rs | the macOS Screen Recording gate |
+| `list_video_codecs` | recorder.rs | which encoders this ffmpeg build actually has |
+| `tesseract_available()` | ocr.rs | Tesseract presence + its languages, re-checked every call (§14) |
+| `get_app_settings` / `set_app_settings` | settings.rs | `settings.json`; shortcuts have their own path |
 | `grab_screen(monitorId?)` | capture.rs | full monitor as base64 PNG (NOT saved) — for the overlay |
 | `import_png(pngBase64)` | capture.rs | save a PNG data-URL as a new item |
 | `import_file(path)` | capture.rs | import an existing image file |
@@ -230,15 +246,32 @@ mutation. Child components receive callbacks + a `toast()` fn. Images are shown 
 - This fixes "main window appears in recordings" and makes ⇧⌘5 a true start/stop toggle
   (previously known limitations #1 and #2).
 
-### The region overlay (freeze-frame pattern) — important
-`openRegionOverlay(mode, monitorId)` creates a transparent, fullscreen, always-on-top
-`WebviewWindow` labeled `"overlay"` loading `overlay.html?mode=shot|record&monitor=<id>`.
-It calls `grab_screen` to get a frozen PNG of the display, dims it, lets the user drag a rect, then:
-- **shot**: crops client-side from the frozen image, `import_png`, emits `captured`, closes.
-- **record**: converts the rect to physical px and emits `region-selected`, closes.
+### The region overlay — important (no longer freeze-frame)
+`openRegionOverlay(mode, monitors, pick)` shows **one overlay window per display**, labelled
+`overlay-<monitorId>`, created at startup by `prewarmRegionOverlays` and thereafter **hidden and
+reused** rather than recreated. Monitor id, scale factor and physical origin are baked into each
+window's URL and never change; only `{mode, pick}` varies, broadcast as `overlay-init`.
 
-Why freeze-frame: capturing live would also capture the overlay veil. CSS→physical conversion uses
-`grab.width / window.innerWidth` (≈ monitor scale factor).
+The window is **transparent** — there is no frozen backdrop and no dim veil, so the crosshair is
+usable on the first frame with nothing to wait for. A 1%-opaque fill is all that makes it
+hit-test pointer events. `grab_screen` still exists but the overlay no longer uses it.
+
+Things in this file that look removable and are not:
+- **`acceptFirstMouse: true`** — a capture started from the tray runs while another app is
+  frontmost, and macOS otherwise swallows the activating click. Without it every tray and
+  hotkey capture loses the press that starts the drag and reports `no-gesture`.
+- **`setPointerCapture` in a `try`** — the windows are reused, so a gesture interrupted by the
+  window hiding can leave stale capture for a dead pointer; the throw would abort the handler
+  and silently break dragging for the rest of the session.
+- **`up` measures from the event, never from `sel`** — `sel` is written by pointermove, whose
+  re-render React may defer, so a fast drag read `{w:0,h:0}` and cancelled itself.
+- **`visibleOnAllWorkspaces` and not `fullscreen`** — native fullscreen gives the window its own
+  Space and animates a desktop switch to it.
+
+Per mode, on pointerup: **shot** → `capture_region`/`capture_window`, emits `captured`;
+**multishot** → collects (§13); **record** → `region-selected`; **text** → `text-region-selected`;
+**scroll** → `scroll-region-selected`. `overlay-dismiss` hides every overlay;
+`overlay-cancelled` additionally means the main window should come back.
 
 ### Annotation editor (`AnnotationEditor.tsx`) — opens automatically right after every capture
 - **Shottr-style: the toolbar opens immediately after any screenshot** (full monitor, delayed, or
@@ -271,7 +304,10 @@ Why freeze-frame: capturing live would also capture the overlay veil. CSS→phys
 
 ## 7. Permissions / capabilities
 
-- `src-tauri/capabilities/default.json` applies to windows `["main","overlay"]`. Includes core
+- `src-tauri/capabilities/default.json` applies to windows
+  `["main","overlay-*","stopbar","scrollbar","editor","regionhint","textpanel"]`. **A new window
+  label that is not in this list gets no permissions and fails silently at runtime** — that is
+  the first thing to check when a new window does nothing. Includes core
   window ops (create/close/hide/show/is-visible/unminimize/set-always-on-top/start-dragging),
   `opener`, `dialog`, `shell:allow-open`, `fs` read/write + **fs:scope** for
   `$PICTURE/CaptureStudio/**` and `$HOME/CaptureStudio/**`.
@@ -312,13 +348,40 @@ Why freeze-frame: capturing live would also capture the overlay veil. CSS→phys
   is not deployed and there is no paid plan (see server/README.md and the "Not yet done" list in
   §11).
 
+- **Crop** in the annotation editor, and a **post-capture action** setting (§13).
+- **Video trimming** — frame-accurate, in place or as a copy (§13).
+- **All displays** — every monitor in one image, laid out as the desktop arranges them (§13).
+- **Multi-region capture** (⌃⇧7) — N regions of one display from a single grab, saved as
+  separate files or one stitched sheet (§13).
+- **Zoom to cursor** on recordings — optional post-pass that eases in on wherever the cursor
+  settled (§13).
+- **Text recognition** — Vision on macOS; `Windows.Media.Ocr` plus optional Tesseract on Windows,
+  which is what makes Vietnamese work there (§14).
+- **Scrolling capture**, **window picker**, **batch image optimiser**, **video codec picker**,
+  **rebindable global shortcuts**, **PNG/JPEG capture format**.
+- **Donate card** in Settings — PayPal plus a **VietQR** code generated in-app (`lib/vietqr.ts`,
+  EMVCo/NAPAS, CRC-16/CCITT-FALSE), chosen by system language.
+- **Report a bug** — Settings' right-hand column and a link in its footer, both opening a GitHub
+  issue or an email with the version and OS already filled in (`lib/links.ts`).
+
 ### Known limitations ⚠️ (good next tasks)
+0. **`xcap` 0.9.8 grabs the screen with `CGWindowListCreateImage`**, which Apple deprecated in
+   macOS 14. It still works, but it is the single largest piece of borrowed time in this app: the
+   modern replacement is **ScreenCaptureKit**, whose API is async and whose adoption means
+   replacing the capture backend rather than patching it. Windows has the same story with
+   Windows Graphics Capture. Nothing is broken today; this is the thing to plan for.
 1. **Annotation shapes can't be selected/moved/deleted individually** — only global Undo/Clear. Add
    hit-testing + a selection/move tool (the `select` tool is currently a no-op).
-2. **No video trimming** after recording. Add an ffmpeg-based trim command.
+2. ~~No video trimming~~ — done (§13). Still missing: **splitting** a recording into several
+   clips, and joining. Both are the same ffmpeg shape as `trim_video`, wanting only UI.
 3. **ffmpeg not bundled** — consider shipping a sidecar binary via Tauri's externalBin.
-4. **Region overlay assumes the primary monitor** — multi-monitor region needs the overlay to open on
-   the monitor under the cursor and pass that monitor's id/scale.
+4. ~~Region overlay assumes the primary monitor~~ — done: one overlay per display, each carrying
+   its own id, scale and origin (§6).
+   **Still open:** a Windows *region* recording passes the rectangle straight to gdigrab's
+   `-offset_x/-offset_y`, which are **virtual-desktop** coordinates, while the overlay sends
+   **monitor-relative** ones. They coincide on a single-monitor setup and diverge on any other,
+   so region recording on a secondary Windows display records the wrong rectangle. Untested — no
+   Windows machine here.
 5. ~~No scrolling capture / window-picker capture~~ — both implemented (`scroll.rs`,
    `list_windows` + the overlay's window pick).
 6. Optional: hide the Dock icon (macOS `ActivationPolicy::Accessory`) to be a pure menu-bar app.
@@ -332,6 +395,14 @@ Why freeze-frame: capturing live would also capture the overlay veil. CSS→phys
    along with `BUY_URL` (still `example.com`) and the undeployed `web/` site the password-reset
    link points at. Turning it on means: deploy `server/`, set `API_BASE`, deploy `web/` with a
    filled `site.config.json`, set `BUY_URL`, then flip the flag.
+11. **Deleting is permanent** — `Library::remove` unlinks the file immediately, with no trash and
+    no undo. A `.trash/` folder inside the library dir plus a Trash filter would be the fix; the
+    cloud-copy reaping in `delete_item` would have to be deferred until the trash is emptied.
+12. **No click indicators during recording** — the cursor is sampled at 20 Hz for zoom-to-cursor
+    (§13) but its *buttons* are not. `NSEvent.pressedMouseButtons` on macOS and
+    `GetAsyncKeyState` on Windows both read button state without any permission prompt, so the
+    sampler could carry it; drawing the ripples is then another ffmpeg overlay pass. Untested on
+    Windows, which is the reason it was not attempted.
 10. **Capture Area can't include Capture Studio's own window** — every mode except the window
     picker hides the app first (`openOverlay` in `App.tsx`), because a WKWebView cropped out of a
     whole-monitor grab comes back as a black rectangle. Capturing the app itself works today only
@@ -431,6 +502,176 @@ setup steps. It is **not part of the Tauri app's build** and deploys independent
 - Self-service cancel/refund UI (PayPal subscriptions are cancelled from the user's own PayPal
   account; PayOS has nothing recurring to cancel).
 
+
+## 13. Multi-region capture and zoom-to-cursor
+
+Two features that share nothing technically but were built together, and both have a shape that
+is easy to get wrong on a second reading.
+
+### Capture Multiple Areas
+
+**Its own tray item, action and shortcut (⌃⇧7) — deliberately not a modifier on Capture Area.**
+That path is the most-used thing in the app; making its overlay decide mid-gesture whether a drag
+is one region or the first of several would put a state machine in the busiest code here. A
+separate entry point leaves the common path untouched, and it also removes the need for any
+`if (n === 1)` special-casing downstream.
+
+- `overlay.tsx` mode `"multishot"` **collects** on pointerup instead of finishing: the overlay
+  stays up, each committed rectangle is drawn with its index, Backspace drops the last one and
+  Escape throws the set away. A too-small drag is dropped in silence here — in this mode it is
+  nearly always a stray click between two real selections, not a failed capture.
+- **Enter broadcasts `multishot-confirm`** rather than acting where the key was pressed.
+  Keyboard focus sits on one overlay but the regions may have been drawn on another display's;
+  every overlay hears the event and only the one holding regions responds.
+- The save-as dialog is rendered **inside** the overlay. A separate window would have to be
+  created, placed on the right display and focused while a borderless always-on-top surface
+  already covers the screen — and would land behind it as often as not.
+- `AppSettings.multiRegionSave` (`""` | `"separate"` | `"combined"`) skips the dialog once the
+  user ticks "always do this". It ships empty because the right answer depends on the task, not
+  on taste: regions bound for an AI prompt want separate files, regions bound for a document want
+  one sheet, and that is the same person on two different days.
+- `capture_regions` grabs the monitor **once** and crops N times. A loop over `capture_region`
+  would re-grab per rectangle — the slow part — and the crops would be milliseconds apart, so a
+  moving cursor or a mid-animation frame could land in some and not others.
+- Items are saved **non-draft**. Drafts exist so the editor can open a capture before it is
+  committed and are swept at startup if nothing commits them; nothing opens the editor here, so
+  a draft would simply vanish.
+- The result is emitted as **`captured-many`**, never `captured`. `App.tsx`'s `captured` listener
+  opens the annotation editor for its payload, and a set of five would open five editor windows.
+- Stitching (`stitch_sheet`) is vertical, left-aligned, 16px gaps, on the editor's own backdrop
+  colour, **in the order the regions were drawn**. Crops are arbitrary sizes, so a row leaves
+  short ones floating in a band of background and a grid means guessing a column count that is
+  wrong for most selections. The draw order is the only thing the user actually chose; sorting by
+  position would discard it. Covered by unit tests in `capture.rs`.
+
+### Trimming a recording
+
+`trim_video` **re-encodes rather than stream-copying**. `-c copy` can only cut on keyframes, and
+at the ~2-second GOP these recordings carry that puts the cut up to two seconds from where the
+handles were — invisible until playback. Audio is re-encoded for the same reason: a stream copy
+starting mid-packet leaves the sound a fraction ahead of the picture for the whole clip.
+
+The output is written to a `.tmp.` name beside the original and only renamed once ffmpeg has
+returned successfully with a non-empty file. Encoding straight over the source would destroy the
+original whether or not the trim worked. `replace` mirrors `optimize_image`'s flag and defaults
+to false in the UI, because a trim throws away footage nothing can recover.
+
+`TrimModal` scrubs the real `<video>` element rather than building a filmstrip: every thumbnail
+in a strip is another ffmpeg run before anything appears, and what is being chosen here is a
+moment, which scrubbing already shows at full resolution and immediately. Its `stamp()` is local
+and not `formatDuration` — that one rounds to whole seconds, coarser than what is being picked,
+and returns `""` for zero, so an In point at the start would render blank. Drag listeners are
+bound to `window`, not to the track, so a drag that runs off the end keeps tracking.
+
+### All displays
+
+`capture_all_monitors` places each display at its real desktop coordinates rather than laying
+them out in a strip, so a monitor mounted above another comes out above it. Gaps left by an
+uneven arrangement are filled with the sheet backdrop, not left transparent — the saved format
+may be JPEG. Displays are grabbed one after another; there is no API that grabs several
+atomically, and this does not pretend otherwise.
+
+Offered **only in the sidebar's "Choose display…" menu**, which already appears only when there
+is more than one display. It is not a tray item or a shortcut: the tray menu is long enough, and
+the option is meaningless on a single screen.
+
+### Crop, in the annotation editor
+
+Crop is **not** a shape. It changes the picture rather than sitting on top of it, and it cannot
+be taken back by removing an entry from `shapes` — so it waits for an explicit Apply instead of
+committing on pointerup, and `drawShape` returns early for it (falling through would stroke the
+crop box as an ordinary rectangle in the current colour).
+
+Two things it must do that are easy to miss:
+- **The editor keeps its own `size` state.** `item` is a prop describing the file on disk, and a
+  crop only reaches disk on save; sizing the canvas from the prop snaps it back to the original
+  dimensions on the next render, leaving the cropped bitmap drawn into a frame the wrong shape.
+- **Every existing annotation is translated by the crop offset.** Shapes are stored in canvas
+  pixels, so leaving them put slides each arrow and label away from what it pointed at.
+
+The old `ImageBitmap` is `close()`d after `createImageBitmap(im, x, y, w, h)` — nothing else
+frees it. `save_annotated` already writes the new width/height back from the PNG it receives, so
+the Rust side needed no change at all.
+
+### What happens after a screenshot
+
+`AppSettings.afterCapture` — `"editor"` (default), `"copy"`, `"save"`. The editor opening every
+time is right for annotating and wrong for capturing to paste, where it is a window to dismiss on
+every capture.
+
+**The non-editor paths must call `keep_item`.** A fresh capture is a draft: hidden from the
+library and swept at startup unless something commits it, and the editor is normally what does.
+Without that call, "just save it" saves nothing that survives a restart.
+
+### Zoom to cursor (recording)
+
+Optional, off by default (`AppSettings.followCursor`), because it **re-encodes the finished video**
+— time, plus one generation of quality.
+
+- While recording, a thread polls `AppHandle::cursor_position()` at 20 Hz. Polling rather than a
+  global mouse hook: a hook needs Accessibility permission on macOS, which is a second scary
+  system prompt for a cosmetic feature, and 20 Hz is far more than a zoom that moves every few
+  seconds can use. Sampling stops **before** ffmpeg is waited on, so readings from the flush are
+  not counted.
+- **It does not follow the cursor continuously.** That is the obvious reading and it is
+  unwatchable — every stray hand movement swings the frame. `zoom_segments` finds the places the
+  cursor *settled* and eases in on those, the way a human editor cuts in, sits still and pulls
+  back out.
+- The detector classifies each sample as moving or still **by local speed** before grouping
+  anything. Two earlier attempts grouped first and judged the group afterwards, and both failed
+  the same way: a run grown until its bounding box bursts always ends somewhere in the middle of
+  the movement that burst it, so the run is part dwell and part transit and no test applied to it
+  as a whole can separate them. Speed is a property of one sample's neighbourhood, so it puts the
+  boundary in the right place. **Do not "simplify" this back to grouping-then-judging** — the
+  regression tests in `recorder.rs` exist because of it.
+- `zoom_filter` emits a `zoompan` expression whose segments are **summed, not nested**: they never
+  overlap, so each term is zero outside its window, and a sum avoids an `if()` nested once per
+  segment. Easing is smoothstep over a trapezoid; a linear ramp starts and stops visibly. `x`/`y`
+  are the viewport's top-left, derived from the centre and the `zoom` zoompan has already computed
+  for that frame, and clamped so the viewport never leaves the frame.
+- `RecordOptions.origin` — the desktop coordinate that lands on video pixel (0,0) — is computed in
+  `RecordModal` because that is where the monitor list lives and because the answer is
+  platform-specific: avfoundation hands over one display and crops the region inside it, so the
+  origin is that display's corner plus the rectangle; gdigrab's `-i desktop` hands over the whole
+  virtual desktop and takes its offset in desktop coordinates, so the rectangle already is the
+  origin.
+- **Wrong origin degrades to no zoom, never to a wrong zoom**: if under `MIN_INSIDE` of the
+  samples land inside the frame, `zoom_segments` returns nothing. `render_zoom` is likewise
+  best-effort — every failure path leaves the original recording exactly as it was.
+
+---
+
+## 14. Text recognition (OCR)
+
+`ocr.rs` is four modules chosen by `cfg`: a macOS `backend` (Vision via `objc2-vision`), a
+Windows `winocr` (`Windows.Media.Ocr`), a `tesseract` shell-out for everything non-macOS, and a
+dispatcher `backend` that prefers Tesseract whenever it has a model for a language that was asked
+for.
+
+**The thing that cost the most time, written down so nobody repeats it:** Windows keeps two lists
+that look nearly identical in Settings — the system's *preferred display languages*, and the
+languages `Windows.Media.Ocr` actually ships a **recognition model** for. Adding Vietnamese to the
+first does not create the second, and there is no Vietnamese model at all. Nothing errors: OCR
+runs and returns text, just with the diacritics wrong, which looks like a weak model rather than a
+missing one. Only `AvailableRecognizerLanguages` tells the truth. Vietnamese on Windows therefore
+goes through Tesseract.
+
+- WinRT calls run inside `on_mta`, a scoped thread that does `RoInitialize(RO_INIT_MULTITHREADED)`
+  and uninitialises only if it was the one that initialised. `IAsyncOperation` is awaited with
+  **`.join()`** (not `.get()` — renamed in windows-future 0.3.2).
+- `engine_for` matches the whole BCP-47 tag first, then the primary subtag, because macOS Vision
+  says `vi-VT` and Windows says `vi` for the same language.
+- **`tesseract::path()` and `tesseract::languages()` are deliberately uncached.** They had
+  `OnceLock`s and it was a bug: Tesseract gets installed *while the app is running*, and the cache
+  meant "Check again" in Settings re-read a stale answer forever. Do not put the caches back.
+- Tesseract is fed a temp PNG rather than stdin, and read back as TSV. `parse_tsv` uses `f[0]`
+  (level, must be `5`), `f[2..5]` (block/par/line), `f[7]` (**top**, not `f[6]` which is left),
+  `f[9]`, `f[10]`, `f[11]`.
+- `winget install UB-Mannheim.TesseractOCR` installs **English only** — winget runs the installer
+  silently so its language-picker page never appears. `vie.traineddata` has to be downloaded into
+  `tessdata` by hand; **Settings → Text** walks through both steps.
+
+---
 
 ## 12. Licensing (local app)
 

@@ -341,6 +341,16 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
         sc("capture-region", "2").as_deref(),
         menu_icon!(dark, "area"),
     )?;
+    // Its own item rather than a modifier on "Capture Area": that path is the most used thing
+    // in the app, and making its overlay decide mid-gesture whether a drag is one region or the
+    // first of several would put a state machine in the busiest code here. Separate entry
+    // points keep the common one untouched.
+    let multi = mi(
+        "capture-multi",
+        "Capture Multiple Areas",
+        sc("capture-multi", "7").as_deref(),
+        menu_icon!(dark, "areas"),
+    )?;
     let full = mi(
         "capture-full",
         "Capture Screen",
@@ -417,6 +427,7 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
             &text,
             &record,
             &delayed,
+            &multi,
             &sep()?,
             &open_file,
             &clipboard,
@@ -558,13 +569,16 @@ pub fn run() {
             capture::list_monitors,
             capture::list_windows,
             capture::capture_monitor,
+            capture::capture_all_monitors,
             capture::capture_region,
+            capture::capture_regions,
             capture::capture_window,
             capture::grab_screen,
             capture::import_png,
             capture::import_file,
             capture::import_from_clipboard,
             capture::set_clipboard_png,
+            capture::copy_item,
             capture::set_clipboard_text,
             capture::save_annotated,
             capture::keep_item,
@@ -584,6 +598,7 @@ pub fn run() {
             recorder::start_recording,
             recorder::stop_recording,
             recorder::is_recording,
+            recorder::trim_video,
             recorder::list_video_codecs,
             recorder::ensure_thumbnail,
             license::get_license_status,

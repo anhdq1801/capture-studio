@@ -7,6 +7,8 @@
  * `src-tauri/src/cloud.rs`.
  */
 
+import { isMac, isWindows } from "./platform";
+
 /** Origin of the marketing site. Must match `SITE_URL` on the Worker, which builds password
  *  reset links against it. */
 export const SITE_URL = "https://capturestudio.app";
@@ -41,3 +43,54 @@ export const DONATE_BANK = {
   /** No diacritics: the transfer description is not reliably read as UTF-8 by every bank. */
   message: "Ung ho Capture Studio",
 } as const;
+
+/**
+ * Where a bug report goes.
+ *
+ * This link existed only in the release notes and the launch posts, which meant the only people
+ * who could find it were the ones who had already read a Facebook post — not the ones sitting in
+ * front of the app watching it misbehave. Every bug fixed so far was found by the author; zero
+ * reports across the first four releases is what a missing route back looks like from the
+ * outside, and says nothing about how many bugs are left.
+ */
+export const ISSUES_URL = "https://github.com/anhdq1801/capture-studio/issues";
+
+/** The other half of the same thing. Reporting on GitHub means having an account, and someone
+ *  who came here from a link a friend shared is not going to create one to say a capture came
+ *  out wrong. */
+export const CONTACT_EMAIL = "quocanh1801@gmail.com";
+
+/**
+ * A report that already carries the two facts every report needs.
+ *
+ * "It crashes sometimes" costs a round trip to establish which version on which OS, and a good
+ * share of reporters never answer it. Both are known right here, so neither has to be asked for.
+ * The headings are a prompt, not a form — whatever is left blank still sends.
+ */
+function reportBody(version: string): string {
+  const os = isWindows ? "Windows" : isMac ? "macOS" : navigator.platform || "unknown";
+  return [
+    "What happened:",
+    "",
+    "",
+    "What you expected instead:",
+    "",
+    "",
+    `— Capture Studio ${version || "unknown"} · ${os}`,
+  ].join("\n");
+}
+
+/** A new GitHub issue with the version and OS already filled in. */
+export function issueUrl(version: string): string {
+  return `${ISSUES_URL}/new?body=${encodeURIComponent(reportBody(version))}`;
+}
+
+/** The same report as an email, for anyone not on GitHub. */
+export function contactMailto(version: string): string {
+  const subject = `Capture Studio ${version ? `v${version} ` : ""}— bug report`;
+  return (
+    `mailto:${CONTACT_EMAIL}` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(reportBody(version))}`
+  );
+}

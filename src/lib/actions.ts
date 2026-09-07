@@ -19,6 +19,7 @@ export interface ActionLabel {
 
 export const ACTIONS = {
   captureRegion: { label: "Capture Area", icon: "area", shortcut: "capture-region" },
+  captureMulti: { label: "Capture Multiple Areas", icon: "areas", shortcut: "capture-multi" },
   captureFull: { label: "Capture Screen", icon: "screen", shortcut: "capture-full" },
   captureWindow: { label: "Capture Window", icon: "window", shortcut: "capture-window" },
   captureScroll: { label: "Scrolling Capture", icon: "scroll", shortcut: "capture-scroll" },
@@ -40,6 +41,7 @@ export const SHORTCUT_ROWS: { id: ShortcutId; label: string }[] = (
     "captureWindow",
     "captureScroll",
     "captureText",
+    "captureMulti",
     "record",
     "clipboard",
   ] as const

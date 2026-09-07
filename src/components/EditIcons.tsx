@@ -11,6 +11,7 @@ export type IconName =
   | "text"
   | "counter"
   | "blur"
+  | "crop"
   | "undo"
   | "trash"
   | "eraser"
@@ -29,6 +30,14 @@ const P: Record<IconName, ReactElement> = {
   ),
   line: <path d="M5 19L19 5" />,
   rect: <rect x="4" y="6" width="16" height="12" rx="1" />,
+  // The photographer's crop mark: two overlapping L rules, drawn past each other so it
+  // reads as a frame being closed in rather than as a plain rectangle.
+  crop: (
+    <>
+      <path d="M7 2v15h15" />
+      <path d="M2 7h15v15" />
+    </>
+  ),
   ellipse: <ellipse cx="12" cy="12" rx="8" ry="6" />,
   pen: (
     <>

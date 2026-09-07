@@ -23,6 +23,7 @@ interface Props {
   onAnnotate: (i: MediaItem) => void;
   onOptimize: (i: MediaItem) => void;
   onBeautify: (i: MediaItem) => void;
+  onTrim: (i: MediaItem) => void;
   onNeedSubscription: () => void;
   toast: (t: string, k?: "ok" | "err" | "info") => void;
 }
@@ -35,6 +36,7 @@ export function DetailModal({
   onAnnotate,
   onOptimize,
   onBeautify,
+  onTrim,
   onNeedSubscription,
   toast,
 }: Props) {
@@ -194,6 +196,11 @@ export function DetailModal({
                 {isImage && canOcr && (
                   <button className="btn" onClick={copyText} disabled={reading}>
                     {reading ? <i className="spin" /> : "Copy text"}
+                  </button>
+                )}
+                {!isImage && (
+                  <button className="btn" onClick={() => onTrim(item)}>
+                    Trim
                   </button>
                 )}
                 <button className="btn" onClick={() => revealItem(item.id)}>

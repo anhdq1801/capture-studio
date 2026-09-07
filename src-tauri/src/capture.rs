@@ -59,6 +59,32 @@ pub fn set_clipboard_png(png_base64: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Put a library item on the clipboard as an image.
+///
+/// Separate from `set_clipboard_png` because that one takes a base64 data URL, which would mean
+/// reading the file in the webview and shipping a whole screenshot across the IPC boundary as
+/// text — roughly a third bigger than the bytes it encodes — only to be decoded again here.
+/// The file is already on disk and this side can read it.
+#[tauri::command]
+pub fn copy_item(state: State<LibraryState>, id: String) -> Result<(), String> {
+    let path = {
+        let lib = state.lock().map_err(|e| e.to_string())?;
+        let item = lib.get(&id).ok_or_else(|| "Item not found".to_string())?;
+        lib.path_of(&item.file_name)
+    };
+    let img = image::open(&path).map_err(|e| e.to_string())?.to_rgba8();
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let data = arboard::ImageData {
+        width: w,
+        height: h,
+        bytes: std::borrow::Cow::Owned(img.into_raw()),
+    };
+    arboard::Clipboard::new()
+        .map_err(|e| e.to_string())?
+        .set_image(data)
+        .map_err(|e| e.to_string())
+}
+
 /// Put plain text on the clipboard. Goes through arboard like the image path rather than the
 /// webview's clipboard API, which is unreliable when the window isn't focused — and after a
 /// Capture Text the focused thing is whatever app the user was reading.
@@ -176,6 +202,13 @@ const SYSTEM_OWNERS: &[&str] = &[
     "Notification Center",
     "SystemUIServer",
     "Spotlight",
+    // macOS's own screenshot service. It keeps an untitled window the size of the whole display
+    // at the very top of the stacking order, so a front-most-first hit-test matched it before
+    // anything else and every window pick silently became a full-screen one.
+    "Screenshot",
+    "Screenshot App",
+    "Wallpaper",
+    "ScreenSaverEngine",
 ];
 
 /// Titles of the auxiliary windows this app puts on screen during a capture.
@@ -192,6 +225,25 @@ const OWN_HELPER_TITLES: &[&str] = &[
 fn is_own_helper(app_name: &str, title: &str) -> bool {
     let ours = app_name == "capture-studio" || app_name == "Capture Studio";
     ours && OWN_HELPER_TITLES.contains(&title)
+}
+
+/// Is this a backdrop layer rather than a window anyone means to pick?
+///
+/// Kept as a plain function of the values so it can be tested against the real numbers a
+/// misbehaving system process produced, without needing a live window to hand.
+///
+/// Two rules. The name list catches the ones already known by name. The second catches the next
+/// one whatever it turns out to be called: an **untitled** window that covers a whole display.
+/// The missing title is what makes that safe — a browser in fullscreen also matches a display's
+/// bounds exactly, and it always has a title.
+///
+/// `monitor` is the window's *own* display, not the primary: on a mixed-resolution setup those
+/// differ, and a backdrop on the second screen would otherwise sail straight through.
+fn is_backdrop(app_name: &str, title: &str, w: u32, h: u32, monitor: Option<(u32, u32)>) -> bool {
+    if SYSTEM_OWNERS.contains(&app_name) {
+        return true;
+    }
+    title.trim().is_empty() && monitor.is_some_and(|(mw, mh)| w >= mw && h >= mh)
 }
 
 /// Windows the user could plausibly want to capture, front-most first.
@@ -216,7 +268,11 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
         if title.trim().is_empty() && app_name.trim().is_empty() {
             continue;
         }
-        if SYSTEM_OWNERS.contains(&app_name.as_str()) {
+        let own_monitor = w
+            .current_monitor()
+            .ok()
+            .and_then(|m| Some((m.width().ok()?, m.height().ok()?)));
+        if is_backdrop(&app_name, &title, width, height, own_monitor) {
             continue;
         }
         // Skip our own *helper* windows — the crosshair overlays, the recording stop bar, the
@@ -463,6 +519,161 @@ pub fn capture_region(
     save_draft(&state, &settings, cropped)
 }
 
+/// Every display at once, laid out the way the desktop actually arranges them.
+///
+/// Not a horizontal strip of screenshots: displays sit at their real desktop coordinates, so a
+/// monitor mounted above another comes out above it, and a stack of unequal heights keeps its
+/// offsets. Anything not covered by a display — the L-shaped gaps an uneven arrangement leaves
+/// — is filled rather than left transparent, since the saved format may be JPEG.
+///
+/// Each display is grabbed in turn, so this is not a single instant across all of them. There is
+/// no API that grabs several displays atomically, and pretending otherwise by grabbing them
+/// closer together would not change that.
+#[tauri::command]
+pub fn capture_all_monitors(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+) -> Result<MediaItem, String> {
+    let monitors = Monitor::all().map_err(|e| e.to_string())?;
+    if monitors.is_empty() {
+        return Err("No displays found.".into());
+    }
+
+    let mut shots: Vec<(i64, i64, image::RgbaImage)> = Vec::new();
+    for m in &monitors {
+        let sf = m.scale_factor().unwrap_or(1.0);
+        let x = to_physical(m.x().map_err(|e| e.to_string())? as i64, sf);
+        let y = to_physical(m.y().map_err(|e| e.to_string())? as i64, sf);
+        // One unreadable display should not lose the others: a disconnected or asleep monitor
+        // can still be listed while its capture fails.
+        if let Ok(img) = m.capture_image() {
+            shots.push((x, y, img));
+        }
+    }
+    if shots.is_empty() {
+        return Err("None of the displays could be captured.".into());
+    }
+
+    let min_x = shots.iter().map(|(x, _, _)| *x).min().unwrap_or(0);
+    let min_y = shots.iter().map(|(_, y, _)| *y).min().unwrap_or(0);
+    let max_x = shots
+        .iter()
+        .map(|(x, _, i)| x + i.width() as i64)
+        .max()
+        .unwrap_or(0);
+    let max_y = shots
+        .iter()
+        .map(|(_, y, i)| y + i.height() as i64)
+        .max()
+        .unwrap_or(0);
+    let (w, h) = ((max_x - min_x) as u32, (max_y - min_y) as u32);
+    if w == 0 || h == 0 {
+        return Err("The displays reported no usable area.".into());
+    }
+
+    let mut sheet = image::RgbaImage::from_pixel(w, h, SHEET_BG);
+    for (x, y, img) in &shots {
+        imageops::replace(&mut sheet, img, x - min_x, y - min_y);
+    }
+    save_draft(&state, &settings, sheet)
+}
+
+/// One rectangle of a multi-region capture, in this monitor's physical pixels.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The backdrop a stitched sheet is laid out on.
+///
+/// The same value the annotation editor puts behind a canvas, so a sheet opened in the editor
+/// sits on its own colour rather than on a slightly different grey. Opaque rather than
+/// transparent because the saved format may be JPEG, which has no alpha to be transparent in.
+const SHEET_BG: image::Rgba<u8> = image::Rgba([0x2b, 0x2f, 0x38, 0xff]);
+
+/// Gap between regions on a stitched sheet, in pixels of the captured image.
+const SHEET_GAP: u32 = 16;
+
+/// Lay several crops out as one image: stacked vertically, left-aligned, on a flat backdrop.
+///
+/// Vertical and left-aligned because the crops are arbitrary sizes — a row would leave short
+/// ones floating in a band of background, and a grid would mean guessing a column count that is
+/// wrong for most selections. Reading order down the page is the one arrangement that survives
+/// any mix of shapes.
+///
+/// Order is the order they were drawn in, deliberately not re-sorted by position: that order is
+/// the only thing the user actually chose, and re-sorting would silently discard it.
+fn stitch_sheet(crops: &[image::RgbaImage]) -> Result<image::RgbaImage, String> {
+    let width = crops.iter().map(|c| c.width()).max().unwrap_or(0);
+    let height: u32 = crops.iter().map(|c| c.height()).sum::<u32>()
+        + SHEET_GAP * (crops.len().saturating_sub(1)) as u32;
+    if width == 0 || height == 0 {
+        return Err("Empty selection".into());
+    }
+    let mut sheet = image::RgbaImage::from_pixel(width, height, SHEET_BG);
+    let mut y = 0;
+    for crop in crops {
+        imageops::replace(&mut sheet, crop, 0, y as i64);
+        y += crop.height() + SHEET_GAP;
+    }
+    Ok(sheet)
+}
+
+/// Capture several regions of one monitor in a single grab.
+///
+/// The monitor is grabbed **once** and cropped N times. Calling `capture_region` in a loop would
+/// re-grab the screen for every rectangle, which is both the slow part and — because the shots
+/// would be milliseconds apart — a way to catch a moving cursor or a mid-animation frame in some
+/// of the crops but not others. One grab makes the set genuinely simultaneous.
+///
+/// Saved non-draft, unlike the single-region path: drafts exist so the annotation editor can
+/// open a capture before it is committed, and are pruned at startup if nothing commits them.
+/// Nothing opens the editor here (N editors for one gesture is not a UI), so these have to be
+/// real library entries from the moment they are written.
+#[tauri::command]
+pub fn capture_regions(
+    state: State<LibraryState>,
+    settings: State<SettingsState>,
+    monitor_id: Option<u32>,
+    rects: Vec<RegionRect>,
+    combine: bool,
+) -> Result<Vec<MediaItem>, String> {
+    if rects.is_empty() {
+        return Err("Empty selection".into());
+    }
+    let monitor = pick_monitor(monitor_id)?;
+    let full = monitor.capture_image().map_err(|e| e.to_string())?;
+
+    let mut crops: Vec<image::RgbaImage> = Vec::with_capacity(rects.len());
+    for r in &rects {
+        // Clamped rather than rejected: a drag that ended a pixel past the edge of the display
+        // is a selection the user meant, not an error worth throwing the whole set away for.
+        let x = r.x.min(full.width().saturating_sub(1));
+        let y = r.y.min(full.height().saturating_sub(1));
+        let w = r.width.min(full.width() - x);
+        let h = r.height.min(full.height() - y);
+        if w == 0 || h == 0 {
+            continue;
+        }
+        crops.push(imageops::crop_imm(&full, x, y, w, h).to_image());
+    }
+    if crops.is_empty() {
+        return Err("Empty selection".into());
+    }
+
+    if combine {
+        return Ok(vec![save_image(&state, &settings, stitch_sheet(&crops)?, false)?]);
+    }
+    crops
+        .into_iter()
+        .map(|c| save_image(&state, &settings, c, false))
+        .collect()
+}
+
 /// Save an annotated PNG (base64 data-URL body) back over an existing item.
 #[tauri::command]
 pub fn save_annotated(
@@ -524,3 +735,90 @@ pub fn keep_item(state: State<LibraryState>, id: String) -> Result<MediaItem, St
         .ok_or_else(|| "Item not found".to_string())
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn img(w: u32, h: u32, fill: u8) -> image::RgbaImage {
+        image::RgbaImage::from_pixel(w, h, image::Rgba([fill, fill, fill, 0xff]))
+    }
+
+    #[test]
+    fn sheet_is_as_wide_as_its_widest_crop() {
+        let sheet = stitch_sheet(&[img(40, 10, 1), img(120, 10, 2), img(80, 10, 3)]).unwrap();
+        assert_eq!(sheet.width(), 120);
+    }
+
+    #[test]
+    fn gaps_go_between_crops_and_not_after_the_last() {
+        // Three 10px-tall crops: 30px of content plus two gaps, never three.
+        let sheet = stitch_sheet(&[img(20, 10, 1), img(20, 10, 2), img(20, 10, 3)]).unwrap();
+        assert_eq!(sheet.height(), 30 + SHEET_GAP * 2);
+    }
+
+    #[test]
+    fn a_single_crop_gets_no_gap_at_all() {
+        let sheet = stitch_sheet(&[img(20, 10, 1)]).unwrap();
+        assert_eq!((sheet.width(), sheet.height()), (20, 10));
+    }
+
+    #[test]
+    fn crops_keep_their_order_and_their_pixels() {
+        let sheet = stitch_sheet(&[img(20, 10, 0x11), img(20, 10, 0x22)]).unwrap();
+        // First crop at the top, second below it past one gap.
+        assert_eq!(sheet.get_pixel(0, 0)[0], 0x11);
+        assert_eq!(sheet.get_pixel(0, 10 + SHEET_GAP)[0], 0x22);
+        // The gap itself is backdrop, not a smear of either crop.
+        assert_eq!(*sheet.get_pixel(0, 10), SHEET_BG);
+    }
+
+    #[test]
+    fn narrow_crops_sit_on_backdrop_rather_than_being_stretched() {
+        let sheet = stitch_sheet(&[img(20, 10, 0x11), img(60, 10, 0x22)]).unwrap();
+        // Right of the narrow crop's own width, on its row.
+        assert_eq!(*sheet.get_pixel(40, 5), SHEET_BG);
+    }
+
+    #[test]
+    fn nothing_to_stitch_is_an_error_not_a_zero_sized_image() {
+        assert!(stitch_sheet(&[]).is_err());
+    }
+
+    /// The exact window that made every window pick record the whole screen.
+    ///
+    /// macOS's screenshot service keeps an untitled, display-sized window at the very top of
+    /// the stacking order. It has an app name, so the "untitled" check — which required the app
+    /// name to be empty too — let it through, and a front-most-first hit-test then matched it
+    /// before any real window no matter where the user clicked.
+    #[test]
+    fn the_screenshot_services_full_screen_layer_is_not_pickable() {
+        assert!(is_backdrop("Screenshot", "", 3840, 2160, Some((3840, 2160))));
+    }
+
+    #[test]
+    fn an_untitled_display_sized_layer_is_dropped_whatever_it_is_called() {
+        assert!(is_backdrop("SomethingNewApple.app", "", 3840, 2160, Some((3840, 2160))));
+    }
+
+    #[test]
+    fn a_fullscreen_app_window_is_still_pickable_because_it_has_a_title() {
+        assert!(!is_backdrop("Google Chrome", "Releases · x", 3840, 2160, Some((3840, 2160))));
+    }
+
+    #[test]
+    fn an_ordinary_untitled_window_smaller_than_its_display_survives() {
+        assert!(!is_backdrop("Preview", "", 1200, 800, Some((3840, 2160))));
+    }
+
+    #[test]
+    fn a_backdrop_is_judged_against_its_own_display_not_the_biggest_one() {
+        // 1920x1080 covers a 1920x1080 second screen even though the main one is 4K.
+        assert!(is_backdrop("Wallpaper2", "", 1920, 1080, Some((1920, 1080))));
+    }
+
+    #[test]
+    fn a_window_on_no_known_display_is_kept_rather_than_guessed_away() {
+        assert!(!is_backdrop("Preview", "", 3840, 2160, None));
+    }
+}

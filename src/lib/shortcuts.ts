@@ -9,6 +9,7 @@ import { isMac } from "./platform";
  */
 export const SHORTCUT_DEFAULTS = {
   "capture-region": "Control+Shift+2",
+  "capture-multi": "Control+Shift+7",
   "capture-full": "Control+Shift+1",
   "capture-window": "Control+Shift+3",
   "capture-scroll": "Control+Shift+4",

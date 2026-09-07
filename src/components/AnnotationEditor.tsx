@@ -25,7 +25,8 @@ type Tool =
   | "highlight"
   | "text"
   | "counter"
-  | "blur";
+  | "blur"
+  | "crop";
 
 interface StrokeShape {
   tool: "pen" | "highlight";
@@ -34,7 +35,7 @@ interface StrokeShape {
   pts: [number, number][];
 }
 interface GeoShape {
-  tool: "line" | "arrow" | "rect" | "ellipse" | "blur";
+  tool: "line" | "arrow" | "rect" | "ellipse" | "blur" | "crop";
   color: string;
   width: number;
   x0: number;
@@ -71,6 +72,7 @@ const TOOLS: { key: Tool; icon: IconName; label: string }[] = [
   { key: "text", icon: "text", label: "Text" },
   { key: "counter", icon: "counter", label: "Step number" },
   { key: "blur", icon: "blur", label: "Blur / redact" },
+  { key: "crop", icon: "crop", label: "Crop" },
 ];
 const COLORS = ["#ff3b3b", "#ffcc00", "#2ecc71", "#3b82f6", "#ffffff", "#111111"];
 
@@ -93,6 +95,20 @@ export function AnnotationEditor({
   const wrapRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<ImageBitmap | null>(null);
+  /**
+   * The size being edited, which stops matching `item` the moment anything is cropped.
+   *
+   * `item` is a prop and describes the file on disk; a crop only reaches disk on save. Reading
+   * the canvas size straight off the prop — as this did — would snap the canvas back to the
+   * original dimensions on the next render and leave the cropped bitmap drawn into a frame the
+   * wrong size.
+   */
+  const [size, setSize] = useState({
+    w: item.width || 1280,
+    h: item.height || 800,
+  });
+  /** A crop rectangle waiting to be confirmed, in canvas pixels. */
+  const [pendingCrop, setPendingCrop] = useState<GeoShape | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [tool, setTool] = useState<Tool>("arrow");
   const [color, setColor] = useState("#ff3b3b");
@@ -178,6 +194,22 @@ export function AnnotationEditor({
     const all = draft ? [...shapes, draft] : shapes;
     for (const s of all) drawShape(ctx, s, im);
 
+    // A crop waiting to be confirmed: everything outside it dimmed, so the choice is shown as
+    // "this is what you keep" rather than as one more rectangle drawn on the picture.
+    if (pendingCrop) {
+      const { x0, y0, x1, y1 } = pendingCrop;
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, canvas.width, y0);
+      ctx.fillRect(0, y1, canvas.width, canvas.height - y1);
+      ctx.fillRect(0, y0, x0, y1 - y0);
+      ctx.fillRect(x1, y0, canvas.width - x1, y1 - y0);
+      ctx.strokeStyle = "#6d5efc";
+      ctx.lineWidth = Math.max(1.5, canvas.width / 700);
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.restore();
+    }
+
     // Marching-ants box around the selected annotation.
     if (selected !== null && shapes[selected]) {
       const b = shapeBounds(ctx, shapes[selected]);
@@ -188,7 +220,7 @@ export function AnnotationEditor({
       ctx.strokeRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
       ctx.restore();
     }
-  }, [shapes, draft, selected]);
+  }, [shapes, draft, selected, pendingCrop]);
 
   // Paint, then paint again once the window is genuinely on screen.
   //
@@ -445,11 +477,64 @@ export function AnnotationEditor({
     }
     if (!drawingRef.current) return;
     drawingRef.current = false;
-    if (draft) {
-      setShapes((s) => [...s, draft]);
+    if (!draft) return;
+    // A crop is not an annotation: it changes the picture rather than sitting on top of it, and
+    // it cannot be undone by removing a shape. So it waits for an explicit confirm instead of
+    // being applied the moment the mouse comes up.
+    if (draft.tool === "crop") {
+      const g = draft as GeoShape;
+      const rect = {
+        ...g,
+        x0: Math.min(g.x0, g.x1),
+        y0: Math.min(g.y0, g.y1),
+        x1: Math.max(g.x0, g.x1),
+        y1: Math.max(g.y0, g.y1),
+      };
       setDraft(null);
+      // Too small to be deliberate — almost always a stray click while the tool is selected.
+      if (rect.x1 - rect.x0 < 8 || rect.y1 - rect.y0 < 8) return;
+      setPendingCrop(rect);
+      return;
     }
+    setShapes((s) => [...s, draft]);
+    setDraft(null);
   };
+
+  /**
+   * Apply the pending crop: cut the bitmap down, and move every annotation with it.
+   *
+   * Shapes are shifted rather than re-anchored: they are stored in canvas pixels, so leaving
+   * them where they are would slide every arrow and label away from whatever it was pointing at
+   * by exactly the crop offset.
+   */
+  const applyCrop = useCallback(async () => {
+    const c = pendingCrop;
+    const im = imgRef.current;
+    if (!c || !im) return;
+    const x = Math.max(0, Math.round(c.x0));
+    const y = Math.max(0, Math.round(c.y0));
+    const w = Math.min(im.width - x, Math.round(c.x1 - c.x0));
+    const h = Math.min(im.height - y, Math.round(c.y1 - c.y0));
+    if (w < 1 || h < 1) {
+      setPendingCrop(null);
+      return;
+    }
+    try {
+      const next = await createImageBitmap(im, x, y, w, h);
+      imgRef.current = next;
+      // The old bitmap's pixels are no longer reachable and nothing else frees them.
+      im.close();
+      setShapes((prev) => prev.map((sh) => moveShape(sh, -x, -y)));
+      setSize({ w, h });
+      setPendingCrop(null);
+      setSelected(null);
+      // The picture just changed shape; whatever zoom suited the old one rarely suits this.
+      setFitMode(true);
+    } catch (e) {
+      toast(`Couldn't crop that — ${e}`, "err");
+      setPendingCrop(null);
+    }
+  }, [pendingCrop, toast]);
 
   // Canvas-pixel font size for a text annotation, derived from the stroke-width slider.
   const textSize = Math.max(18, width * 4);
@@ -673,7 +758,7 @@ export function AnnotationEditor({
               {color.toUpperCase()}
             </span>
             <span title="Image size">
-              {item.width}×{item.height}
+              {size.w}×{size.h}
             </span>
           </div>
 
@@ -733,15 +818,32 @@ export function AnnotationEditor({
 
         {/* ---- Canvas ---- */}
         <div className="edit-canvas-wrap" ref={wrapRef}>
+          {pendingCrop && (
+            // Floating over the canvas rather than in the toolbar: the choice is about the
+            // rectangle on screen, and a button forty pixels from it is easier to find than one
+            // at the top of the window.
+            <div className="crop-confirm">
+              <span>
+                Crop to {Math.round(pendingCrop.x1 - pendingCrop.x0)}×
+                {Math.round(pendingCrop.y1 - pendingCrop.y0)}
+              </span>
+              <button className="btn sm primary" onClick={applyCrop}>
+                Apply
+              </button>
+              <button className="btn sm ghost" onClick={() => setPendingCrop(null)}>
+                Cancel
+              </button>
+            </div>
+          )}
           <canvas
             ref={canvasRef}
-            width={item.width || 1280}
-            height={item.height || 800}
+            width={size.w}
+            height={size.h}
             style={{
               // Explicit pixels rather than a CSS max-*: the size is the zoom, so zooming past
               // the window has to overflow and scroll rather than being clamped back.
-              width: `${Math.round((item.width || 1280) * zoom)}px`,
-              height: `${Math.round((item.height || 800) * zoom)}px`,
+              width: `${Math.round(size.w * zoom)}px`,
+              height: `${Math.round(size.h * zoom)}px`,
               cursor:
                 tool === "text"
                   ? "text"
@@ -823,6 +925,11 @@ function TB({
 function drawShape(ctx: CanvasRenderingContext2D, s: Shape, im: ImageBitmap) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+
+  // An in-progress crop draws its own dimmed preview in `redraw`, and is never stored as a
+  // shape — falling through to the geometry branch below would stroke it as a plain rectangle
+  // in the current annotation colour.
+  if (s.tool === "crop") return;
 
   if (s.tool === "pen" || s.tool === "highlight") {
     ctx.save();

@@ -2,9 +2,17 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { WindowInfo, captureRegion, captureWindow, listWindows } from "./lib/api";
+import {
+  WindowInfo,
+  captureRegion,
+  captureRegions,
+  captureWindow,
+  getAppSettings,
+  listWindows,
+  setAppSettings,
+} from "./lib/api";
 
-type Mode = "shot" | "record" | "scroll" | "text";
+type Mode = "shot" | "multishot" | "record" | "scroll" | "text";
 type Pick = "area" | "window" | "both";
 
 // There is one overlay window per display, each created for a fixed monitor, so the monitor
@@ -37,6 +45,15 @@ function Overlay() {
   const [mode, setMode] = useState<Mode>("shot");
   const [pick, setPick] = useState<Pick>("area");
   const [sel, setSel] = useState<Rect | null>(null);
+  // Regions already committed in a multi-region capture, in this overlay's CSS pixels. Held
+  // per overlay because a crop is relative to one display: a set spanning two monitors would
+  // have no single origin to be relative to.
+  const [rects, setRects] = useState<Rect[]>([]);
+  // Set once Enter is pressed with regions pending: the overlay stays up and asks the
+  // one-sheet / separate-files question over the selections it is about to capture.
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [windows, setWindows] = useState<WindowInfo[]>([]);
   const [hovered, setHovered] = useState<WindowInfo | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
@@ -47,12 +64,64 @@ function Overlay() {
   pickRef.current = pick;
   const windowsRef = useRef(windows);
   windowsRef.current = windows;
+  const rectsRef = useRef(rects);
+  rectsRef.current = rects;
+  const askingRef = useRef(asking);
+  askingRef.current = asking;
+  // A remembered answer skips the dialog. Re-read per capture rather than cached for the
+  // session: these windows live for the life of the app, so a preference cleared in Settings
+  // has to reach an overlay created long before the change.
+  const savedChoice = useRef("");
 
   const reset = useCallback(() => {
     setSel(null);
     setHovered(null);
+    setRects([]);
+    setAsking(false);
+    setBusy(false);
+    setRemember(false);
     dragging.current = false;
     start.current = null;
+  }, []);
+
+  /**
+   * Take the pending regions and leave.
+   *
+   * The rectangles are read off the ref and converted before anything is dismissed: dismissing
+   * runs `reset()` in this same window, so a `rects` read afterwards would be empty.
+   */
+  const finish = useCallback(async (combine: boolean, rememberIt: boolean) => {
+    const list = rectsRef.current.map((r) => ({
+      x: Math.round(r.x * scaleFactor),
+      y: Math.round(r.y * scaleFactor),
+      width: Math.round(r.w * scaleFactor),
+      height: Math.round(r.h * scaleFactor),
+    }));
+    if (!list.length) return;
+    setBusy(true);
+    if (rememberIt) {
+      try {
+        const current = await getAppSettings();
+        await setAppSettings({
+          ...current,
+          multiRegionSave: combine ? "combined" : "separate",
+        });
+      } catch {
+        /* A preference that will not save is not a reason to throw away the capture. */
+      }
+    }
+    await emit("overlay-dismiss");
+    // Same reason as the single-region path: let the overlay actually leave the screen before
+    // the grab, or its own chrome lands in every one of the crops.
+    await new Promise((r) => setTimeout(r, 90));
+    try {
+      const items = await captureRegions(monitorId, list, combine);
+      // Deliberately not `captured`: that event opens the annotation editor for its payload,
+      // and a set of five would open five editor windows on top of each other.
+      await emit("captured-many", items);
+    } catch (err) {
+      await emit("capture-error", String(err));
+    }
   }, []);
 
   useEffect(() => {
@@ -68,6 +137,28 @@ function Overlay() {
       } else {
         setWindows([]);
       }
+      savedChoice.current = "";
+      if (e.payload.mode === "multishot") {
+        getAppSettings()
+          .then((cfg) => {
+            savedChoice.current = cfg.multiRegionSave || "";
+          })
+          .catch(() => {
+            /* Unreadable settings just means the dialog asks, which is the default anyway. */
+          });
+      }
+    });
+    // Broadcast rather than handled where the key was pressed: keyboard focus sits on one
+    // overlay, but the regions may have been drawn on another display's. Every overlay hears
+    // this and only the one actually holding regions acts on it.
+    const unConfirm = listen("multishot-confirm", () => {
+      if (!rectsRef.current.length || askingRef.current) return;
+      const saved = savedChoice.current;
+      if (saved === "combined" || saved === "separate") {
+        finish(saved === "combined", false);
+        return;
+      }
+      setAsking(true);
     });
     // Any one overlay finishing or cancelling dismisses all of them, so the user never has
     // to close leftover crosshairs on the other displays.
@@ -77,9 +168,10 @@ function Overlay() {
     });
     return () => {
       unInit.then((f) => f());
+      unConfirm.then((f) => f());
       unDismiss.then((f) => f());
     };
-  }, [reset]);
+  }, [reset, finish]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -89,6 +181,20 @@ function Overlay() {
       if (e.key === "Escape") {
         emit("overlay-dismiss");
         emit("overlay-cancelled", { reason: "escape" });
+        return;
+      }
+      if (modeRef.current !== "multishot" || askingRef.current) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        emit("multishot-confirm");
+        return;
+      }
+      // Undo one region rather than the whole set. Escape already throws everything away, and
+      // needing a fresh start because the fourth of five rectangles came out wrong would make
+      // the mode not worth using.
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        setRects((r) => r.slice(0, -1));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -115,6 +221,9 @@ function Overlay() {
   const clampY = (v: number) => Math.max(0, Math.min(v, window.innerHeight));
 
   const down = (e: React.PointerEvent) => {
+    // The dialog is a child of this same surface, so without this a press aimed at one of its
+    // buttons would also start drawing a new region behind it.
+    if (askingRef.current || busy) return;
     // Without this, a drag that leaves this overlay's bounds — off the edge of the screen, or
     // onto the next display's overlay — stops delivering events here, so `up` never fires and
     // the capture is silently dropped. Capturing the pointer keeps the gesture with the
@@ -140,6 +249,7 @@ function Overlay() {
   };
 
   const move = (e: React.PointerEvent) => {
+    if (askingRef.current || busy) return;
     if (!dragging.current || !start.current) {
       // Not dragging: the window highlight follows the cursor wherever windows are pickable.
       if (pickRef.current !== "area") setHovered(windowAt(e.clientX, e.clientY));
@@ -186,6 +296,7 @@ function Overlay() {
   };
 
   const up = async (e: React.PointerEvent) => {
+    if (askingRef.current || busy) return;
     releaseCapture(e);
     dragging.current = false;
     const mode = modeRef.current;
@@ -225,6 +336,20 @@ function Overlay() {
         const y = Math.max(0, pickedWindow.y - originY);
         rect = [x, y, pickedWindow.width, pickedWindow.height];
       }
+    }
+
+    // Multi-region collects instead of finishing: the overlay stays up, and only Enter ends it.
+    // A too-small drag is dropped in silence here rather than reported, because in this mode it
+    // is almost always a stray click between two real selections, not a failed capture.
+    if (mode === "multishot") {
+      setSel(null);
+      if (dragged && from) {
+        setRects((r) => [
+          ...r,
+          { x: Math.min(from.x, toX), y: Math.min(from.y, toY), w, h },
+        ]);
+      }
+      return;
     }
 
     await emit("overlay-dismiss");
@@ -296,7 +421,12 @@ function Overlay() {
         : mode === "text"
           ? "copy text from"
           : "capture";
-  const hint = !canDragArea
+  const multi = mode === "multishot";
+  const hint = multi
+    ? rects.length === 0
+      ? "Drag each area you want · Enter when done"
+      : `${rects.length} area${rects.length > 1 ? "s" : ""} · drag another · Enter to save · Backspace to undo`
+    : !canDragArea
     ? `Click a window to ${verb} it`
     : !canPickWindow
       ? `Drag an area to ${verb}`
@@ -346,6 +476,36 @@ function Overlay() {
           {hovered.title ? ` — ${hovered.title}` : ""}
         </div>
       )}
+      {rects.map((r, i) => (
+        <React.Fragment key={i}>
+          <div
+            style={{
+              position: "fixed",
+              left: r.x,
+              top: r.y,
+              width: r.w,
+              height: r.h,
+              border: `2px solid ${accent}`,
+              background: accentFill,
+              pointerEvents: "none",
+            }}
+          />
+          {/* Numbered because the order is not cosmetic: it is the order they stack in on a
+              combined sheet, and it is the drawing order rather than anything positional. */}
+          <div
+            style={{
+              ...labelStyle,
+              left: r.x + 4,
+              top: r.y + 4,
+              background: accent,
+              minWidth: 16,
+              textAlign: "center",
+            }}
+          >
+            {i + 1}
+          </div>
+        </React.Fragment>
+      ))}
       {sel && (
         <>
           <div
@@ -373,7 +533,91 @@ function Overlay() {
           </div>
         </>
       )}
-      {!sel && (
+      {asking && (
+        // Rendered inside the overlay rather than in a window of its own: a new window would
+        // have to be created, positioned on the right display and focused while a borderless
+        // always-on-top surface already covers the screen, and it would land behind it as often
+        // as not.
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "-apple-system, sans-serif",
+          }}
+        >
+          <div
+            style={{
+              background: "#1c1f26",
+              border: "1px solid rgba(255,255,255,0.14)",
+              borderRadius: 14,
+              padding: "22px 24px",
+              width: 380,
+              color: "#fff",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.55)",
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600 }}>
+              Save {rects.length} areas how?
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5, opacity: 0.72, marginTop: 8 }}>
+              One image stacks them top to bottom in the order you drew them. Separate images
+              keeps each one its own file.
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button
+                disabled={busy}
+                onClick={() => finish(false, remember)}
+                style={dialogBtn(accent)}
+              >
+                {rects.length} separate images
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => finish(true, remember)}
+                style={dialogBtn()}
+              >
+                One combined image
+              </button>
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 16,
+                fontSize: 12,
+                opacity: 0.72,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+              />
+              Always do this — stop asking
+            </label>
+            {/* The way back matters as much as the two answers: the regions are still on
+                screen and adding a sixth should not mean starting over. */}
+            <div style={{ fontSize: 11.5, opacity: 0.5, marginTop: 12 }}>
+              Esc cancels · click Back to keep selecting
+            </div>
+            <button
+              disabled={busy}
+              onClick={() => setAsking(false)}
+              style={{ ...dialogBtn(), marginTop: 10, width: "100%" }}
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      )}
+      {!sel && !asking && (
         <div
           style={{
             position: "fixed",
@@ -394,6 +638,21 @@ function Overlay() {
       )}
     </div>
   );
+}
+
+/** Buttons for the save-as dialog. Local to this window: the overlay loads no stylesheet. */
+function dialogBtn(fill?: string): React.CSSProperties {
+  return {
+    flex: 1,
+    padding: "9px 12px",
+    borderRadius: 9,
+    border: fill ? "1px solid transparent" : "1px solid rgba(255,255,255,0.18)",
+    background: fill ?? "rgba(255,255,255,0.06)",
+    color: "#fff",
+    fontSize: 12.5,
+    fontFamily: "-apple-system, sans-serif",
+    cursor: "pointer",
+  };
 }
 
 const labelStyle: React.CSSProperties = {

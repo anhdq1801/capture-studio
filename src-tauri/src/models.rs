@@ -114,6 +114,19 @@ pub struct RecordOptions {
     pub codec: Option<String>,
     /// Override the saved output resolution for this recording only.
     pub resolution: Option<String>,
+    /// Sample the cursor while recording and zoom the finished video in on wherever it settled.
+    pub follow_cursor: Option<bool>,
+    /// Desktop physical coordinate that lands on video pixel (0,0).
+    ///
+    /// Sent from the frontend because that is where the monitor list already lives, and because
+    /// the answer differs by platform: avfoundation hands over one display, so the origin is
+    /// that display's; gdigrab's `-i desktop` hands over the whole virtual desktop, whose
+    /// origin is the top-left of the leftmost/topmost monitor and can be negative. Without it
+    /// the cursor samples cannot be placed in the video's own coordinates.
+    pub origin: Option<[i32; 2]>,
+    /// Physical size of the captured area before any resolution downscale, so the samples can
+    /// be scaled to the encoded frame.
+    pub capture_size: Option<[u32; 2]>,
 }
 
 /// One image queued in the batch optimiser.
@@ -161,6 +174,27 @@ pub struct AppSettings {
     /// with its default intact, in a settings file written before it existed.
     #[serde(default = "crate::settings::default_shortcuts")]
     pub shortcuts: HashMap<String, String>,
+    /// What Enter does at the end of a multi-region capture, once the user has asked not to be
+    /// asked again.
+    ///
+    /// `""` — the shipped state — means ask every time, which is the right default because the
+    /// answer depends on the task rather than on taste: regions bound for an AI prompt want
+    /// separate files, regions bound for a document want one sheet, and that is the same person
+    /// on two different days. `"separate"` and `"combined"` are set only by ticking the box in
+    /// that dialog, and cleared again from Settings.
+    #[serde(default)]
+    pub multi_region_save: String,
+    /// Whether new recordings zoom in on wherever the cursor settles. Off by default: it
+    /// re-encodes the finished video, which costs time and one generation of quality, and that
+    /// is not a trade to make on someone's behalf.
+    #[serde(default)]
+    pub follow_cursor: bool,
+    /// What happens to a fresh screenshot: `"editor"` (the default), `"copy"` or `"save"`.
+    ///
+    /// The editor opening on every capture is right for annotating and wrong for the people who
+    /// capture to paste — for them it is a window to dismiss, every single time.
+    #[serde(default = "default_after_capture")]
+    pub after_capture: String,
     /// `"png"` | `"jpg"` — the file type new captures are written as.
     ///
     /// Only ever consulted when a capture is first written. Items already in the library keep
@@ -168,6 +202,12 @@ pub struct AppSettings {
     /// files the user has already shared, linked or opened elsewhere.
     #[serde(default = "default_image_format")]
     pub image_format: String,
+}
+
+/// Opening the editor stays the default: it is the only option that leaves every other one a
+/// click away, and it is what every existing install already does.
+fn default_after_capture() -> String {
+    "editor".into()
 }
 
 fn default_ocr_languages() -> Vec<String> {

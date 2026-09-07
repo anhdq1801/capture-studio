@@ -17,6 +17,8 @@ interface Props {
   onFixScreenPermission: () => void;
   onCaptureFull: (monitorId: number | null) => void;
   onCaptureRegion: () => void;
+  onCaptureAll: () => void;
+  onCaptureMulti: () => void;
   onCaptureWindow: () => void;
   onCaptureScroll: () => void;
   onCaptureText: () => void;
@@ -37,6 +39,8 @@ export function Sidebar({
   onFixScreenPermission,
   onCaptureFull,
   onCaptureRegion,
+  onCaptureAll,
+  onCaptureMulti,
   onCaptureWindow,
   onCaptureScroll,
   onCaptureText,
@@ -121,6 +125,7 @@ export function Sidebar({
           <CaptureBtn action={ACTIONS.captureScroll} onClick={onCaptureScroll} />
           <CaptureBtn action={ACTIONS.captureText} onClick={onCaptureText} />
           <CaptureBtn action={ACTIONS.captureDelayed} onClick={onCaptureDelayed} />
+          <CaptureBtn action={ACTIONS.captureMulti} onClick={onCaptureMulti} />
           {monitors.length > 1 && (
             <>
               <button className="side-btn" onClick={() => setMenu((m) => !m)}>
@@ -131,6 +136,19 @@ export function Sidebar({
               </button>
               {menu && (
                 <div className="dropdown-menu">
+                  {/* First, and only offered here: it is meaningless on one display, and this
+                      menu is already where someone with several comes looking. */}
+                  <button
+                    onClick={() => {
+                      setMenu(false);
+                      onCaptureAll();
+                    }}
+                  >
+                    <span className="dd-name">All displays</span>
+                    <span className="dd-sub">
+                      {monitors.length} screens in one image
+                    </span>
+                  </button>
                   {monitors.map((m) => (
                     <button
                       key={m.id}

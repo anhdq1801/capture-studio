@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { MonitorInfo } from "./api";
 
 /** What happens to the selection once it's made. */
-export type OverlayMode = "shot" | "record" | "scroll" | "text";
+export type OverlayMode = "shot" | "multishot" | "record" | "scroll" | "text";
 /**
  * How the selection is made. Kept separate from the mode so every mode can offer either
  * gesture — "click a window" and "drag an area" are independent of what we do with the

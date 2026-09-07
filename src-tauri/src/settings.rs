@@ -22,8 +22,9 @@ fn settings_path() -> PathBuf {
 /// The ids are the tray menu's own item ids so the menu can show whatever the user has chosen;
 /// `record` is the one place they differ from the action, because clicking it in the menu opens
 /// the window first while the shortcut only toggles.
-pub const SHORTCUTS: [(&str, &str, &str); 7] = [
+pub const SHORTCUTS: [(&str, &str, &str); 8] = [
     ("capture-region", "capture-region", "2"),
+    ("capture-multi", "capture-multi", "7"),
     ("capture-full", "capture-full", "1"),
     ("capture-window", "capture-window", "3"),
     ("capture-scroll", "capture-scroll", "4"),
@@ -81,6 +82,9 @@ impl Default for AppSettings {
             ocr_languages: vec!["vi-VT".into(), "en-US".into()],
             shortcuts: default_shortcuts(),
             image_format: "png".into(),
+            multi_region_save: String::new(),
+            follow_cursor: false,
+            after_capture: "editor".into(),
         }
     }
 }

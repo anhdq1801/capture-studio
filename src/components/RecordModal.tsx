@@ -6,12 +6,15 @@ import {
   MonitorInfo,
   RESOLUTIONS,
   AppSettings,
+  RecordOptions,
   getAppSettings,
   listCaptureDevices,
   listVideoCodecs,
+  setAppSettings,
   startRecording,
 } from "../lib/api";
 import { openRegionOverlay } from "../lib/overlay";
+import { isWindows } from "../lib/platform";
 import { showRegionHint, hideRegionHint } from "../lib/regionhint";
 import { Toggle } from "./Modal";
 import { UiIcon } from "./Icons";
@@ -31,6 +34,10 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
   const [fps, setFps] = useState(30);
   const [cursor, setCursor] = useState(true);
   const [region, setRegion] = useState<[number, number, number, number] | null>(null);
+  // Which display the region was drawn on. Needed to turn a monitor-relative rectangle
+  // into the desktop coordinate the cursor samples are measured in.
+  const [regionMonitor, setRegionMonitor] = useState<MonitorInfo | null>(null);
+  const [follow, setFollow] = useState(false);
   const [area, setArea] = useState<"full" | "window" | "area">("full");
   const startedRef = useRef(false);
   const [rec, setRec] = useState<AppSettings | null>(null);
@@ -47,7 +54,12 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
         if (preferred) setScreen(preferred.index);
       })
       .catch((e) => toast(String(e), "err"));
-    getAppSettings().then(setRec).catch(() => {});
+    getAppSettings()
+      .then((cfg) => {
+        setRec(cfg);
+        setFollow(cfg.followCursor);
+      })
+      .catch(() => {});
     listVideoCodecs().then(setCodecs).catch(() => setCodecs([]));
   }, [toast]);
 
@@ -57,6 +69,7 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
       (e) => {
         const { rect, monitorId } = e.payload;
         setRegion(rect);
+        setRegionMonitor(monitors.find((m) => m.id === monitorId) ?? null);
         // Outline the chosen area on screen so the selection is visible, not just a number.
         showRegionHint(
           monitors.find((m) => m.id === monitorId) ?? null,
@@ -78,6 +91,39 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
     };
   }, []);
 
+  /**
+   * Where video pixel (0,0) sits on the desktop, so cursor samples can be placed in the frame.
+   *
+   * Mirrors what the two capture backends actually do rather than what would be tidiest:
+   * avfoundation hands over one display and the region is cropped inside it, so the origin is
+   * that display's corner plus the rectangle; gdigrab's `-i desktop` hands over the whole
+   * virtual desktop and takes its offset in desktop coordinates, so the rectangle already *is*
+   * the origin. Getting this wrong does not produce a wrong zoom — the Rust side notices its
+   * samples landing outside the frame and leaves the video alone.
+   */
+  const zoomGeometry = (): Pick<RecordOptions, "origin" | "captureSize"> => {
+    if (region) {
+      const [rx, ry, rw, rh] = region;
+      const base = isWindows
+        ? ([0, 0] as const)
+        : ([regionMonitor?.x ?? 0, regionMonitor?.y ?? 0] as const);
+      return { origin: [base[0] + rx, base[1] + ry], captureSize: [rw, rh] };
+    }
+    // Whole screen. On Windows that is every display at once, whose origin is the top-left of
+    // the leftmost and topmost of them and may be negative.
+    if (isWindows) {
+      const x = Math.min(...monitors.map((m) => m.x));
+      const y = Math.min(...monitors.map((m) => m.y));
+      const w = Math.max(...monitors.map((m) => m.x + m.width)) - x;
+      const h = Math.max(...monitors.map((m) => m.y + m.height)) - y;
+      return { origin: [x, y], captureSize: [w, h] };
+    }
+    const m = monitors.find((mo) => mo.isPrimary) ?? monitors[0];
+    return m
+      ? { origin: [m.x, m.y], captureSize: [m.width, m.height] }
+      : {};
+  };
+
   const start = async () => {
     setStarting(true);
     try {
@@ -87,8 +133,16 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
         fps,
         captureCursor: cursor,
         region: region ?? undefined,
+        followCursor: follow,
+        ...(follow ? zoomGeometry() : {}),
       });
       startedRef.current = true;
+      // Remembered on use rather than on toggle: flicking the switch and then cancelling should
+      // not change what the next recording does. Failure is ignored — the recording has already
+      // started and is not worth interrupting over a preference.
+      if (rec && rec.followCursor !== follow) {
+        setAppSettings({ ...rec, followCursor: follow }).catch(() => {});
+      }
       toast("Recording started");
       onStarted();
     } catch (e) {
@@ -233,6 +287,19 @@ export function RecordModal({ monitors, onClose, onStarted, toast }: Props) {
                   onChange={() => setCursor((v) => !v)}
                   label="Capture cursor"
                 />
+              </div>
+              <div className="row">
+                <span className="lbl">Zoom to cursor</span>
+                <Toggle
+                  on={follow}
+                  onChange={() => setFollow((v) => !v)}
+                  label="Zoom to cursor"
+                />
+              </div>
+              <div className="hint" style={{ marginTop: -4 }}>
+                Finds the places you stopped and settled, and eases in on each one. It does not
+                track the pointer continuously — a frame that chases every hand movement is
+                unwatchable. Costs a second encode when the recording ends.
               </div>
             </>
           )}

@@ -76,6 +76,16 @@ export interface RecordOptions {
   region?: [number, number, number, number];
   codec?: string;
   resolution?: string;
+  /** Sample the cursor and zoom the finished video in on wherever it settled. */
+  followCursor?: boolean;
+  /**
+   * Desktop physical coordinate that lands on video pixel (0,0) — sent from here because this
+   * is where the monitor list lives, and because the answer is platform-specific (see the Rust
+   * side). Without it `followCursor` is ignored rather than guessed at.
+   */
+  origin?: [number, number];
+  /** Physical size of the captured area, before any resolution downscale. */
+  captureSize?: [number, number];
 }
 
 /** Output height preset; "source" keeps the display's native resolution. */
@@ -119,7 +129,24 @@ export interface AppSettings {
   ocrLanguages: string[];
   /** Accelerator per shortcut id, e.g. `{"capture-region": "Control+Shift+2"}`. */
   shortcuts: Record<string, string>;
+  /**
+   * `""` (ask each time), `"separate"` or `"combined"` — what Enter does at the end of a
+   * multi-region capture. Only ever set by the "don't ask again" box in that dialog.
+   */
+  multiRegionSave: string;
+  /** Zoom finished recordings in on wherever the cursor settled. Costs a second encode. */
+  followCursor: boolean;
+  /** `"editor"` | `"copy"` | `"save"` — what a fresh screenshot does next. */
+  afterCapture: AfterCapture;
 }
+
+export type AfterCapture = "editor" | "copy" | "save";
+
+export const AFTER_CAPTURE: { id: AfterCapture; label: string; hint: string }[] = [
+  { id: "editor", label: "Open the editor", hint: "Annotate before saving" },
+  { id: "copy", label: "Copy to clipboard", hint: "Saved too, ready to paste" },
+  { id: "save", label: "Just save it", hint: "Straight to the library" },
+];
 
 export interface CodecOption {
   id: string;
@@ -157,6 +184,8 @@ export const restartApp = () => invoke<void>("restart_app");
 export const listMonitors = () => invoke<MonitorInfo[]>("list_monitors");
 export const captureMonitor = (monitorId?: number) =>
   invoke<MediaItem>("capture_monitor", { monitorId: monitorId ?? null });
+/** Every display in one image, laid out at their real desktop positions. */
+export const captureAllMonitors = () => invoke<MediaItem>("capture_all_monitors");
 export const captureRegion = (
   monitorId: number | null,
   x: number,
@@ -171,6 +200,50 @@ export const captureRegion = (
     width: Math.round(width),
     height: Math.round(height),
   });
+/**
+ * Several regions of one display, captured from a single grab of it.
+ *
+ * `combine` decides the shape of the result, not just the file count: false returns one item
+ * per rectangle, true returns a single item with all of them stacked on one sheet. Either way
+ * these are saved as ordinary library entries rather than drafts — nothing opens the editor for
+ * them, so there is nothing to commit them later.
+ */
+export const captureRegions = (
+  monitorId: number | null,
+  rects: { x: number; y: number; width: number; height: number }[],
+  combine: boolean
+) =>
+  invoke<MediaItem[]>("capture_regions", {
+    monitorId,
+    combine,
+    rects: rects.map((r) => ({
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      width: Math.round(r.width),
+      height: Math.round(r.height),
+    })),
+  });
+/**
+ * Cut a recording down to `[startMs, endMs)`.
+ *
+ * `replace: false` leaves the original alone and adds the trim as a new item; `true` overwrites
+ * it. Re-encodes either way — a stream copy can only cut on keyframes, which lands up to a
+ * couple of seconds from where the handles were put.
+ */
+export const trimVideo = (
+  id: string,
+  startMs: number,
+  endMs: number,
+  replace: boolean
+) =>
+  invoke<MediaItem>("trim_video", {
+    id,
+    startMs: Math.round(startMs),
+    endMs: Math.round(endMs),
+    replace,
+  });
+/** Put a library item on the clipboard as an image, read from disk on the Rust side. */
+export const copyItem = (id: string) => invoke<void>("copy_item", { id });
 export const saveAnnotated = (id: string, pngBase64: string) =>
   invoke<MediaItem>("save_annotated", { id, pngBase64 });
 /** Keep a draft capture as-is, without re-encoding it through the annotation canvas. */

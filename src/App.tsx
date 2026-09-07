@@ -9,6 +9,10 @@ import {
   getLibrary,
   listMonitors,
   captureMonitor,
+  captureAllMonitors,
+  copyItem,
+  getAppSettings,
+  keepItem,
   importFile,
   importFromClipboard,
   stopRecording,
@@ -41,6 +45,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Gallery } from "./components/Gallery";
 import { DetailModal } from "./components/DetailModal";
 import { OptimizeModal } from "./components/OptimizeModal";
+import { TrimModal } from "./components/TrimModal";
 import { BeautifyModal } from "./components/BeautifyModal";
 import { RecordModal } from "./components/RecordModal";
 import { Optimizer } from "./components/Optimizer";
@@ -64,6 +69,7 @@ export default function App() {
   const [filter, setFilter] = useState<Filter>("all");
   const [detail, setDetail] = useState<MediaItem | null>(null);
   const [optimizeTarget, setOptimizeTarget] = useState<MediaItem | null>(null);
+  const [trimTarget, setTrimTarget] = useState<MediaItem | null>(null);
   const [beautifyTarget, setBeautifyTarget] = useState<MediaItem | null>(null);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -207,6 +213,29 @@ export default function App() {
    */
   const openEditorForCapture = useCallback(
     async (item: MediaItem) => {
+      // What happens next is a setting, because the editor opening every time is right for
+      // annotating and wrong for capturing to paste — for that, it is a window to dismiss on
+      // every single capture.
+      const next = await getAppSettings()
+        .then((cfg) => cfg.afterCapture)
+        .catch(() => "editor" as const);
+
+      if (next === "copy" || next === "save") {
+        await restoreAfterCapture(false);
+        await restoreOwnWindows();
+        try {
+          // A fresh capture is a draft, which the library hides and sweeps at startup. The
+          // editor is what normally commits one; nothing opens it here, so this has to.
+          await keepItem(item.id);
+          if (next === "copy") await copyItem(item.id);
+          await reload();
+          toast(next === "copy" ? "Copied to clipboard" : "Saved to library");
+        } catch (e) {
+          toast(String(e), "err");
+        }
+        return;
+      }
+
       await restoreAfterCapture(false);
       await restoreOwnWindows("editor");
       try {
@@ -215,7 +244,7 @@ export default function App() {
         toast(String(e), "err");
       }
     },
-    [restoreAfterCapture, restoreOwnWindows, toast]
+    [restoreAfterCapture, restoreOwnWindows, reload, toast]
   );
 
   // The region overlay notifies us when a screenshot was captured.
@@ -224,6 +253,21 @@ export default function App() {
       reload();
       openEditorForCapture(e.payload);
     });
+    // A multi-region capture lands as a set, and deliberately does NOT open the editor: one
+    // gesture would otherwise produce N editor windows stacked on each other. The items are
+    // already committed to the library (not drafts), so there is nothing waiting to be kept —
+    // the toast is the whole acknowledgement, and anything worth annotating is opened from the
+    // library like any other item.
+    const unMany = listen<MediaItem[]>("captured-many", async (e) => {
+      const n = e.payload?.length ?? 0;
+      await restoreAfterCapture(false);
+      await restoreOwnWindows();
+      await reload();
+      toast(
+        n === 1 ? "Saved 1 image" : `Saved ${n} images`,
+        n > 0 ? "ok" : "err"
+      );
+    });
     const unErr = listen<string>("capture-error", (e) => {
       toast(e.payload, "err");
       restoreAfterCapture(true);
@@ -231,6 +275,7 @@ export default function App() {
     });
     return () => {
       un.then((f) => f());
+      unMany.then((f) => f());
       unErr.then((f) => f());
     };
   }, [reload, toast, openEditorForCapture, restoreAfterCapture, restoreOwnWindows]);
@@ -330,33 +375,62 @@ export default function App() {
     else await openScreenPermissionSettings().catch(() => {});
   }, [toast]);
 
-  const captureFull = useCallback(
-    async (monitorId: number | null) => {
+  /**
+   * Clear the screen, grab it, hand the result to the editor.
+   *
+   * Shared by "Capture Screen" and "All displays" because the only difference between them is
+   * the one call in the middle, and the parts around it are where the mistakes live.
+   */
+  const captureWholeScreen = useCallback(
+    async (grab: () => Promise<MediaItem>) => {
       const win = getCurrentWindow();
       if (busyRef.current) return;
       if (!(await ensureScreenAccess())) return;
       busyRef.current = true;
       setBusy("capture");
       try {
-        await win.hide();
+        // Recorded, not assumed. This path used to hide the window without noting that it had,
+        // so `restoreAfterCapture` — which only shows a window it knows it hid — did nothing,
+        // and closing the editor left the app running with no window anywhere. That is the same
+        // failure users reported as a crash, on a path the original fix never touched.
+        const wasVisible = await win.isVisible();
+        if (wasVisible) await win.hide();
+        hidForCapture.current = hidForCapture.current || wasVisible;
         hiddenForCapture.current = [
           ...new Set([...hiddenForCapture.current, ...(await hideOwnWindows())]),
         ];
         await new Promise((r) => setTimeout(r, 320));
-        const item = await captureMonitor(monitorId ?? undefined);
+        const item = await grab();
         await reload();
         await openEditorForCapture(item);
       } catch (e) {
         toast(String(e), "err");
-        await win.show();
-        await win.setFocus();
+        await restoreAfterCapture(true);
         await restoreOwnWindows();
       } finally {
         busyRef.current = false;
         setBusy(null);
       }
     },
-    [reload, toast, openEditorForCapture, restoreOwnWindows, ensureScreenAccess]
+    [
+      reload,
+      toast,
+      openEditorForCapture,
+      restoreAfterCapture,
+      restoreOwnWindows,
+      ensureScreenAccess,
+    ]
+  );
+
+  const captureFull = useCallback(
+    (monitorId: number | null) =>
+      captureWholeScreen(() => captureMonitor(monitorId ?? undefined)),
+    [captureWholeScreen]
+  );
+
+  const captureAll = useCallback(
+    () => captureWholeScreen(captureAllMonitors),
+    [captureWholeScreen]
   );
 
   // Opening the overlay can take a moment on first use; without a busy state these three
@@ -444,6 +518,7 @@ export default function App() {
   }, [restoreAfterCapture, restoreOwnWindows]);
 
   const captureRegion = useCallback(() => openOverlay("shot", "area"), [openOverlay]);
+  const captureMulti = useCallback(() => openOverlay("multishot", "area"), [openOverlay]);
   const captureWindowPick = useCallback(() => openOverlay("shot", "window"), [openOverlay]);
   const captureScroll = useCallback(() => openOverlay("scroll", "both"), [openOverlay]);
   const captureText = useCallback(() => openOverlay("text", "area"), [openOverlay]);
@@ -684,6 +759,9 @@ export default function App() {
         case "capture-region":
           captureRegion();
           break;
+        case "capture-multi":
+          captureMulti();
+          break;
         case "capture-window":
           captureWindowPick();
           break;
@@ -717,6 +795,7 @@ export default function App() {
   }, [
     captureFull,
     captureRegion,
+    captureMulti,
     captureWindowPick,
     captureScroll,
     captureDelayed,
@@ -781,6 +860,8 @@ export default function App() {
         screenReady={screenReady}
         onFixScreenPermission={fixScreenPermission}
         onCaptureRegion={captureRegion}
+        onCaptureAll={captureAll}
+        onCaptureMulti={captureMulti}
         onCaptureWindow={captureWindowPick}
         onCaptureScroll={captureScroll}
         onCaptureText={captureText}
@@ -908,6 +989,10 @@ export default function App() {
             setDetail(null);
             setBeautifyTarget(it);
           }}
+          onTrim={(it) => {
+            setDetail(null);
+            setTrimTarget(it);
+          }}
           onNeedSubscription={needSubscription}
           toast={toast}
         />
@@ -934,6 +1019,15 @@ export default function App() {
         <OptimizeModal
           item={optimizeTarget}
           onClose={() => setOptimizeTarget(null)}
+          onDone={reload}
+          toast={toast}
+        />
+      )}
+
+      {trimTarget && (
+        <TrimModal
+          item={trimTarget}
+          onClose={() => setTrimTarget(null)}
           onDone={reload}
           toast={toast}
         />

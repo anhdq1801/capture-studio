@@ -57,6 +57,18 @@ def area():
     return im
 
 
+def areas():
+    """Two selection rectangles: the same gesture, made more than once before it finishes.
+
+    They meet at a corner rather than overlapping. An overlap at 18pt turns the seam into a
+    third shape and the glyph stops reading as "two of them".
+    """
+    im, d = canvas()
+    d.rounded_rectangle([u(8), u(10), u(52), u(48)], radius=u(6), outline=C, width=W)
+    d.rounded_rectangle([u(48), u(52), u(92), u(90)], radius=u(6), outline=C, width=W)
+    return im
+
+
 def screen():
     """A display on a stand."""
     im, d = canvas()
@@ -170,7 +182,7 @@ def app():
 
 
 ICONS = {
-    "app": app, "area": area, "screen": screen, "window": window, "scroll": scroll,
+    "app": app, "area": area, "areas": areas, "screen": screen, "window": window, "scroll": scroll,
     "text": text, "record": record, "delayed": delayed, "openfile": openfile,
     "clipboard": clipboard, "settings": settings, "quit": quit_,
 }

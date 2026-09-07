@@ -9,6 +9,7 @@ import { ReactElement } from "react";
  */
 export type UiIconName =
   | "area"
+  | "areas"
   | "screen"
   | "window"
   | "scroll"
@@ -32,6 +33,14 @@ const PATHS: Record<UiIconName, ReactElement> = {
       <path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8" />
       <path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16" />
       <path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
+    </>
+  ),
+  // Two selections meeting at a corner. They do not overlap: at 24px an overlap reads as one
+  // odd shape rather than as two rectangles.
+  areas: (
+    <>
+      <rect x="3" y="3.5" width="10" height="9" rx="1.6" />
+      <rect x="11" y="11.5" width="10" height="9" rx="1.6" />
     </>
   ),
   screen: (

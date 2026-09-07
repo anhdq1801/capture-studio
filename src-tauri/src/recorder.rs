@@ -4,7 +4,8 @@ use crate::settings::SettingsState;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::State;
 
 pub struct RecordingSession {
@@ -14,6 +15,31 @@ pub struct RecordingSession {
     started: chrono::DateTime<chrono::Local>,
     width: u32,
     height: u32,
+    /// Where the cursor was, sampled while recording. Empty unless cursor-follow was asked for.
+    cursor: Arc<Mutex<Vec<CursorSample>>>,
+    /// Set on stop so the sampling thread ends instead of outliving the recording.
+    sampling: Arc<AtomicBool>,
+    /// Everything the zoom pass needs to place those samples in the encoded frame.
+    zoom: Option<ZoomInput>,
+    /// Frame rate the recording was made at. The zoom pass re-encodes and would otherwise
+    /// resample a 60 fps capture down to zoompan's default.
+    fps: u32,
+}
+
+/// One cursor reading: milliseconds since the recording started, and desktop physical position.
+#[derive(Clone, Copy)]
+pub struct CursorSample {
+    t_ms: u64,
+    x: i32,
+    y: i32,
+}
+
+#[derive(Clone, Copy)]
+struct ZoomInput {
+    /// Desktop coordinate that lands on video pixel (0,0).
+    origin: (i32, i32),
+    /// Captured size before any downscale; 0 means "read it off the finished file instead".
+    capture: (u32, u32),
 }
 
 pub type RecorderState = Mutex<Option<RecordingSession>>;
@@ -454,8 +480,265 @@ pub fn ensure_thumbnail(
     Ok(Some(thumb_path.to_string_lossy().to_string()))
 }
 
+/// How often the cursor is read while recording.
+const CURSOR_HZ: u64 = 20;
+
+/// One stretch where the cursor stayed put: hold this centre from `t0` to `t1` seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ZoomSeg {
+    t0: f64,
+    t1: f64,
+    cx: f64,
+    cy: f64,
+}
+
+/// A run of nearby dwells covered by a single sustained zoom.
+///
+/// The camera goes in once at the start, **pans** between the dwells without ever coming back
+/// out, and pulls out once at the end. Zooming out and straight back in between two dwells a
+/// second apart is what made the first version pump in and out for the length of a recording —
+/// working at a screen means settle, move, settle, and treating each settle as its own zoom
+/// turns an ordinary working rhythm into constant camera movement.
+#[derive(Debug, Clone, PartialEq)]
+struct ZoomPass {
+    dwells: Vec<ZoomSeg>,
+}
+
+impl ZoomPass {
+    fn t0(&self) -> f64 {
+        self.dwells.first().map(|d| d.t0).unwrap_or(0.0)
+    }
+    fn t1(&self) -> f64 {
+        self.dwells.last().map(|d| d.t1).unwrap_or(0.0)
+    }
+}
+
+/// How far the cursor may wander and still count as staying put, as a fraction of frame width.
+const DWELL_RADIUS: f64 = 0.12;
+/// Above this speed — as a fraction of frame width per second — the cursor is travelling rather
+/// than working, and nothing there is worth cutting in on.
+const STILL_SPEED_FRAC: f64 = 0.06;
+/// Half-width of the window a sample's speed is measured over. Too short and a single jittery
+/// reading reads as movement; too long and the start of a real move is blamed on the dwell
+/// before it.
+const SPEED_WINDOW_S: f64 = 0.25;
+/// A dwell shorter than this is not worth zooming for — the move in and out would be most of it.
+const MIN_DWELL_S: f64 = 1.8;
+/// Dwells separated by less than this stay inside one zoom and are panned between. Longer than
+/// that and the recording has genuinely moved on, so pulling out and showing the whole screen
+/// again is the honest thing to do.
+const JOIN_GAP_S: f64 = 5.0;
+/// A pan further than this share of the frame is worse than a zoom out: at full zoom the picture
+/// would race past for most of a second with nothing legible in it.
+const MAX_PAN_FRAC: f64 = 0.55;
+/// Seconds spent easing in, and again easing out.
+const RAMP_S: f64 = 0.5;
+/// How far in to go. Past roughly 2x, text that was legible at full size starts to soften,
+/// because the pixels being magnified are all there ever were.
+const ZOOM: f64 = 1.75;
+/// Nothing is zoomed unless at least this share of samples landed inside the frame — a low hit
+/// rate means the origin we mapped through was wrong, and zooming would be zooming somewhere
+/// arbitrary. Degrading to an untouched video is the safe failure.
+const MIN_INSIDE: f64 = 0.6;
+
+/// Reduce a cursor track to the handful of places worth zooming in on.
+///
+/// Following the cursor continuously is the obvious reading of "follow the cursor" and it is
+/// unwatchable: every stray hand movement swings the whole frame. What reads as deliberate is
+/// what a human editor does — cut in where something is happening, sit still, pull back out. So
+/// the track is searched for stretches where the cursor stayed in one area, and only those
+/// become zooms.
+fn zoom_passes(samples: &[CursorSample], w: f64, h: f64, duration_s: f64) -> Vec<ZoomPass> {
+    if samples.len() < 2 || duration_s < 4.0 || w <= 0.0 || h <= 0.0 {
+        return Vec::new();
+    }
+    let inside = samples
+        .iter()
+        .filter(|s| {
+            (s.x as f64) >= 0.0 && (s.x as f64) < w && (s.y as f64) >= 0.0 && (s.y as f64) < h
+        })
+        .count();
+    if (inside as f64) / (samples.len() as f64) < MIN_INSIDE {
+        return Vec::new();
+    }
+
+    let span = w * DWELL_RADIUS * 2.0;
+
+    // Classify every sample as moving or still *before* grouping anything.
+    //
+    // Grouping first and judging the group afterwards is what the two earlier attempts did, and
+    // both failed the same way: a run grown until its bounding box bursts always ends somewhere
+    // in the middle of the movement that burst it, so the run is part dwell and part transit and
+    // no test applied to it as a whole can say which. Speed is a property of a single sample's
+    // neighbourhood, so it draws the boundary in the right place and the grouping afterwards is
+    // trivial.
+    let still_speed = w * STILL_SPEED_FRAC;
+    let at = |k: usize| (samples[k].t_ms as f64 / 1000.0, samples[k].x as f64, samples[k].y as f64);
+    let still: Vec<bool> = (0..samples.len())
+        .map(|k| {
+            let (tk, _, _) = at(k);
+            // Widened by time rather than by sample count so a dropped sample does not read as
+            // a sudden jump.
+            let mut a = k;
+            while a > 0 && at(a).0 > tk - SPEED_WINDOW_S {
+                a -= 1;
+            }
+            let mut b = k;
+            while b + 1 < samples.len() && at(b).0 < tk + SPEED_WINDOW_S {
+                b += 1;
+            }
+            let ((ta, xa, ya), (tb, xb, yb)) = (at(a), at(b));
+            let dt = tb - ta;
+            dt <= 0.0 || (xb - xa).hypot(yb - ya) / dt < still_speed
+        })
+        .collect();
+
+    let mut segs: Vec<ZoomSeg> = Vec::new();
+    let mut run: Option<(usize, (f64, f64), (f64, f64), (f64, f64), f64)> = None;
+    let close = |run: &mut Option<(usize, (f64, f64), (f64, f64), (f64, f64), f64)>,
+                     last: usize,
+                     segs: &mut Vec<ZoomSeg>| {
+        if let Some((first, _, _, sum, n)) = run.take() {
+            let t0 = samples[first].t_ms as f64 / 1000.0;
+            let t1 = samples[last].t_ms as f64 / 1000.0;
+            if t1 - t0 >= MIN_DWELL_S && n > 0.0 {
+                segs.push(ZoomSeg { t0, t1, cx: sum.0 / n, cy: sum.1 / n });
+            }
+        }
+    };
+
+    for k in 0..samples.len() {
+        let (_, x, y) = at(k);
+        if !still[k] {
+            close(&mut run, k.saturating_sub(1), &mut segs);
+            continue;
+        }
+        match run.as_mut() {
+            // Still, but far enough from where this run started that it is a new place: a
+            // cursor can creep a long way without ever exceeding the speed threshold.
+            Some((_, lo, hi, _, _)) if hi.0.max(x) - lo.0.min(x) > span || hi.1.max(y) - lo.1.min(y) > span => {
+                close(&mut run, k.saturating_sub(1), &mut segs);
+                run = Some((k, (x, y), (x, y), (x, y), 1.0));
+            }
+            Some((_, lo, hi, sum, n)) => {
+                *lo = (lo.0.min(x), lo.1.min(y));
+                *hi = (hi.0.max(x), hi.1.max(y));
+                *sum = (sum.0 + x, sum.1 + y);
+                *n += 1.0;
+            }
+            None => run = Some((k, (x, y), (x, y), (x, y), 1.0)),
+        }
+    }
+    close(&mut run, samples.len() - 1, &mut segs);
+
+    // Too short to outlast its own ramps: it would never reach full zoom and would read as a
+    // twitch rather than as a move.
+    segs.retain(|d| d.t1 - d.t0 >= 0.6);
+
+    // Group what is left into passages. A gap short enough to pan across stays inside the
+    // current passage; anything longer, or further than the eye will follow at full zoom,
+    // starts a new one.
+    let max_pan = w * MAX_PAN_FRAC;
+    let mut passes: Vec<ZoomPass> = Vec::new();
+    for d in segs {
+        let joins = passes.last().is_some_and(|p| {
+            let last = p.dwells.last().expect("a pass is never built empty");
+            d.t0 - last.t1 < JOIN_GAP_S
+                && (d.cx - last.cx).hypot(d.cy - last.cy) <= max_pan
+        });
+        if joins {
+            passes.last_mut().expect("just checked").dwells.push(d);
+        } else {
+            passes.push(ZoomPass { dwells: vec![d] });
+        }
+    }
+    // A whole passage still has to be worth the trip in and out.
+    passes.retain(|p| p.t1() - p.t0() >= RAMP_S * 2.0 + 0.4);
+    passes
+}
+
+/// Build the `zoompan` expression for a set of passages.
+///
+/// Passages are summed rather than nested: they never overlap, so each term is zero outside its
+/// own window, and a flat sum avoids an `if()` nested once per passage. `smoothstep` on a
+/// trapezoid gives the ease in and out; a linear ramp starts and stops with a visible jerk.
+///
+/// Inside a passage the zoom is held flat and only the **centre** moves, easing from one dwell
+/// to the next across the gap between them. That is the whole point of a passage: the camera
+/// pans rather than dropping back out to full frame and coming in again.
+///
+/// `x`/`y` are the viewport's top-left, so they follow from the centre and the `zoom` value
+/// zoompan has already computed for the frame. Clamping them keeps the viewport inside the
+/// frame — without it a centre near an edge shows black.
+fn zoom_filter(passes: &[ZoomPass], out_w: u32, out_h: u32, fps: u32) -> String {
+    let (mut z, mut cx, mut cy) = (String::from("1"), String::new(), String::new());
+    for p in passes {
+        let (t0, t1) = (p.t0(), p.t1());
+        let up = format!("clip((it-{t0:.3})/{RAMP_S:.3},0,1)");
+        let down = format!("clip(({t1:.3}-it)/{RAMP_S:.3},0,1)");
+        let trap = format!("({up}*{down})");
+        let ease = format!("({trap}*{trap}*(3-2*{trap}))");
+        let gate = format!("between(it,{t0:.3},{t1:.3})*{ease}");
+        z.push_str(&format!("+{gate}*{:.4}", ZOOM - 1.0));
+
+        // The centre path: the first dwell's centre, plus one eased step per move to the next.
+        // Each step is 0 before its gap, 1 after it, so they accumulate into a path that sits
+        // still on each dwell and travels only in between.
+        let first = &p.dwells[0];
+        let (mut px, mut py) = (format!("{:.1}", first.cx), format!("{:.1}", first.cy));
+        for pair in p.dwells.windows(2) {
+            let (from, to) = (&pair[0], &pair[1]);
+            // A pan needs a little time even when the dwells nearly touch, or the picture jumps.
+            let span = (to.t0 - from.t1).max(0.35);
+            let s = format!("clip((it-{:.3})/{span:.3},0,1)", from.t1);
+            let step = format!("({s}*{s}*(3-2*{s}))");
+            px.push_str(&format!("+{step}*{:.1}", to.cx - from.cx));
+            py.push_str(&format!("+{step}*{:.1}", to.cy - from.cy));
+        }
+        // Multiplied by the same ease as the zoom, so the centre is back at the middle of the
+        // frame exactly when the zoom reaches 1 and `x` lands on 0 rather than being clamped there.
+        cx.push_str(&format!("+{gate}*(({px})-iw/2)"));
+        cy.push_str(&format!("+{gate}*(({py})-ih/2)"));
+    }
+    let x = format!("max(0,min(iw-iw/zoom,(iw/2{cx})-iw/zoom/2))");
+    let y = format!("max(0,min(ih-ih/zoom,(ih/2{cy})-ih/zoom/2))");
+    format!("zoompan=z='{z}':x='{x}':y='{y}':d=1:s={out_w}x{out_h}:fps={fps}")
+}
+
+/// Re-encode `src` with the zoom applied, returning true only if a finished file came back.
+///
+/// Deliberately best-effort: every failure path leaves the original recording exactly as it
+/// was. A zoom is a nicety, and losing a recording to it would be an appalling trade.
+fn render_zoom(src: &Path, filter: &str, fps: u32) -> bool {
+    let tmp = src.with_extension("zoom.tmp.mp4");
+    let ok = ffmpeg()
+        .args(["-y", "-hide_banner", "-loglevel", "error"])
+        .arg("-i")
+        .arg(src)
+        .args(["-vf", filter])
+        .args(["-r", &fps.to_string()])
+        .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
+        .args(["-pix_fmt", "yuv420p"])
+        // Audio is copied rather than re-encoded: the filter never touches it, and a second
+        // AAC pass would cost quality for nothing.
+        .args(["-c:a", "copy"])
+        .arg(&tmp)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok && tmp.exists() && file_size(&tmp) > 0 && std::fs::rename(&tmp, src).is_ok() {
+        return true;
+    }
+    let _ = std::fs::remove_file(&tmp);
+    false
+}
+
 #[tauri::command]
 pub fn start_recording(
+    app: tauri::AppHandle,
     lib_state: State<LibraryState>,
     rec_state: State<RecorderState>,
     settings_state: State<SettingsState>,
@@ -603,6 +886,48 @@ pub fn start_recording(
 
     let child = cmd.spawn().map_err(|e| format!("Failed to start ffmpeg: {e}"))?;
 
+    // Cursor-follow needs to know where video pixel (0,0) is on the desktop. Without that the
+    // samples cannot be placed in the frame, so the option is simply not honoured rather than
+    // honoured against a guess.
+    let zoom = opts
+        .follow_cursor
+        .unwrap_or(false)
+        .then(|| opts.origin)
+        .flatten()
+        .map(|[ox, oy]| ZoomInput {
+            origin: (ox, oy),
+            capture: opts
+                .capture_size
+                .map(|[w, h]| (w, h))
+                .unwrap_or((width, height)),
+        });
+
+    let cursor: Arc<Mutex<Vec<CursorSample>>> = Arc::new(Mutex::new(Vec::new()));
+    let sampling = Arc::new(AtomicBool::new(zoom.is_some()));
+    if zoom.is_some() {
+        // Polled on a thread of its own rather than hooked into the OS event stream: a global
+        // mouse hook needs Accessibility permission on macOS, which is a second scary system
+        // prompt for a cosmetic feature. Polling needs no permission at all and 20 Hz is far
+        // more resolution than a zoom that moves once every few seconds can use.
+        let (samples, run, handle) = (cursor.clone(), sampling.clone(), app.clone());
+        let began = std::time::Instant::now();
+        std::thread::spawn(move || {
+            let step = std::time::Duration::from_millis(1000 / CURSOR_HZ);
+            while run.load(Ordering::Relaxed) {
+                if let Ok(pos) = handle.cursor_position() {
+                    if let Ok(mut v) = samples.lock() {
+                        v.push(CursorSample {
+                            t_ms: began.elapsed().as_millis() as u64,
+                            x: pos.x as i32,
+                            y: pos.y as i32,
+                        });
+                    }
+                }
+                std::thread::sleep(step);
+            }
+        });
+    }
+
     let session = RecordingSession {
         child,
         id: format!("rec-{}", chrono::Local::now().format("%Y%m%d-%H%M%S%3f")),
@@ -610,6 +935,10 @@ pub fn start_recording(
         started: chrono::Local::now(),
         width,
         height,
+        cursor,
+        sampling,
+        zoom,
+        fps,
     };
     *rec_state.lock().map_err(|e| e.to_string())? = Some(session);
     Ok(())
@@ -624,6 +953,11 @@ pub fn stop_recording(
         let mut guard = rec_state.lock().map_err(|e| e.to_string())?;
         guard.take().ok_or_else(|| "No recording in progress".to_string())?
     };
+
+    // Stopped before the wait below, not after: ffmpeg can take a second or two to flush, and
+    // cursor readings from after the last recorded frame would point the zoom at wherever the
+    // hand happened to move while the user waited.
+    session.sampling.store(false, Ordering::Relaxed);
 
     // Ask ffmpeg to finish encoding gracefully.
     if let Some(mut stdin) = session.child.stdin.take() {
@@ -658,6 +992,40 @@ pub fn stop_recording(
     let (width, height) =
         probe_dimensions(&path).unwrap_or((session.width, session.height));
 
+    // The zoom pass runs before the thumbnail, so the poster frame is taken from the video the
+    // user will actually watch rather than from the untouched one.
+    if let Some(zi) = session.zoom {
+        // Samples are in desktop coordinates; the video's are relative to the captured area and
+        // then shrunk by whatever resolution preset applied.
+        let cap_w = if zi.capture.0 > 0 { zi.capture.0 } else { width };
+        let scale = if cap_w > 0 { width as f64 / cap_w as f64 } else { 1.0 };
+        let samples: Vec<CursorSample> = session
+            .cursor
+            .lock()
+            .map(|v| {
+                v.iter()
+                    .map(|s| CursorSample {
+                        t_ms: s.t_ms,
+                        x: (((s.x - zi.origin.0) as f64) * scale).round() as i32,
+                        y: (((s.y - zi.origin.1) as f64) * scale).round() as i32,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let passes = zoom_passes(
+            &samples,
+            width as f64,
+            height as f64,
+            duration_ms as f64 / 1000.0,
+        );
+        if !passes.is_empty() {
+            // Return value ignored on purpose: a zoom that could not be rendered leaves the
+            // original recording untouched, which is a worse video but never a lost one.
+            let filter = zoom_filter(&passes, width, height, session.fps);
+            let _ = render_zoom(&path, &filter, session.fps);
+        }
+    }
+
     // Generated here rather than lazily from the gallery so a recording has a picture the
     // moment it lands in the library.
     let thumb = thumb_name_for(&session.file_name);
@@ -685,7 +1053,277 @@ pub fn stop_recording(
     Ok(item)
 }
 
+/// Cut a recording down to `[start_ms, end_ms)`.
+///
+/// Re-encodes rather than stream-copying. `-c copy` can only cut on keyframes, which at the
+/// 2-second GOP these recordings are written with means the cut lands up to two seconds away
+/// from where the user put it — and the difference is invisible until they play it back. A
+/// re-encode costs time and one generation of quality and lands on the frame they chose.
+///
+/// `replace` mirrors `optimize_image`: false writes a new library item and leaves the original
+/// alone, true overwrites in place. Trimming throws away footage that cannot be recovered, so
+/// the caller decides rather than this function assuming.
+#[tauri::command]
+pub fn trim_video(
+    lib_state: State<LibraryState>,
+    settings_state: State<SettingsState>,
+    id: String,
+    start_ms: u64,
+    end_ms: u64,
+    replace: bool,
+) -> Result<MediaItem, String> {
+    if end_ms <= start_ms {
+        return Err("The end of the trim has to come after its start.".into());
+    }
+    let duration_ms = end_ms - start_ms;
+    if duration_ms < 200 {
+        return Err("That trim is shorter than a fifth of a second.".into());
+    }
+
+    let (src_path, item, dir) = {
+        let lib = lib_state.lock().map_err(|e| e.to_string())?;
+        let item = lib.get(&id).ok_or_else(|| "Item not found".to_string())?;
+        (lib.path_of(&item.file_name), item, lib.dir.clone())
+    };
+    if item.kind != "recording" {
+        return Err("Only recordings can be trimmed.".into());
+    }
+
+    let saved = settings_state.lock().map_err(|e| e.to_string())?.clone();
+    let encoders = available_encoders();
+    // Keep whatever container the recording already uses: the extension is in the item's file
+    // name and in any link the user has already shared.
+    let ext = item
+        .file_name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_string())
+        .unwrap_or_else(|| "mp4".into());
+    let encoder = encoder_for(&saved.codec, &encoders)
+        .filter(|_| container_for(&saved.codec) == ext)
+        .or_else(|| encoder_for("h264", &encoders))
+        .ok_or_else(|| "Your ffmpeg build has no usable video encoder.".to_string())?;
+
+    let base = item
+        .file_name
+        .rsplit_once('.')
+        .map(|(b, _)| b.to_string())
+        .unwrap_or_else(|| item.file_name.clone());
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
+    // Always written beside the original first. Encoding straight over the source would leave a
+    // half-written file if ffmpeg died, and the original would be gone either way.
+    let tmp_path = dir.join(format!("{base}-trim-{stamp}.tmp.{ext}"));
+
+    let secs = |ms: u64| format!("{}.{:03}", ms / 1000, ms % 1000);
+    let mut cmd = ffmpeg();
+    cmd.args(["-y", "-hide_banner", "-loglevel", "error"])
+        .args(["-ss", &secs(start_ms)])
+        .arg("-i")
+        .arg(&src_path)
+        .args(["-t", &secs(duration_ms)])
+        .args(["-c:v", encoder]);
+    match encoder {
+        e if e.ends_with("_videotoolbox") || e.ends_with("_nvenc") => {
+            cmd.args(["-b:v", bitrate_for(item.height.max(720))]);
+        }
+        "libx265" => {
+            cmd.args(["-preset", "veryfast", "-crf", "28"]);
+        }
+        "libsvtav1" => {
+            cmd.args(["-preset", "8", "-crf", "35"]);
+        }
+        "libvpx-vp9" => {
+            cmd.args(["-deadline", "good", "-cpu-used", "3", "-crf", "34", "-b:v", "0"]);
+        }
+        _ => {
+            cmd.args(["-preset", "veryfast", "-crf", "21"]);
+        }
+    }
+    if ext == "mp4" {
+        cmd.args(["-pix_fmt", "yuv420p"]);
+    }
+    // Re-encoded rather than copied: a stream copy starting mid-packet leaves the audio a
+    // fraction ahead of the picture for the whole clip.
+    cmd.args(["-c:a", "aac", "-b:a", "128k"]);
+    cmd.arg(&tmp_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+    if !ok || !tmp_path.exists() || file_size(&tmp_path) == 0 {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err("ffmpeg could not write the trimmed clip.".into());
+    }
+
+    let (out_name, out_id) = if replace {
+        (item.file_name.clone(), item.id.clone())
+    } else {
+        (format!("{base}-trim-{stamp}.{ext}"), format!("rec-{stamp}"))
+    };
+    let out_path = dir.join(&out_name);
+    std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
+
+    let (width, height) = probe_dimensions(&out_path).unwrap_or((item.width, item.height));
+    // The poster frame is regenerated: the old one was taken from a moment that may no longer
+    // be in the clip at all.
+    let thumb = thumb_name_for(&out_name);
+    let thumb_name =
+        make_thumbnail(&out_path, &dir.join(&thumb), duration_ms).then_some(thumb);
+
+    let trimmed = MediaItem {
+        id: out_id,
+        kind: "recording".into(),
+        file_name: out_name,
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        note: item.note.clone(),
+        width,
+        height,
+        size_bytes: file_size(&out_path),
+        duration_ms: Some(duration_ms),
+        thumb_name,
+        draft: false,
+        // A trim is a different file from the one that was uploaded, so it carries no link.
+        cloud_url: None,
+        uploaded_at: None,
+    };
+    lib_state
+        .lock()
+        .map_err(|e| e.to_string())?
+        .add(trimmed.clone());
+    Ok(trimmed)
+}
+
 #[tauri::command]
 pub fn is_recording(rec_state: State<RecorderState>) -> bool {
     rec_state.lock().map(|g| g.is_some()).unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cursor parked at one spot for `secs`, sampled at the real rate.
+    fn dwell(from_s: f64, secs: f64, x: i32, y: i32) -> Vec<CursorSample> {
+        let step = 1000 / CURSOR_HZ;
+        let n = ((secs * 1000.0) as u64 / step).max(1);
+        (0..n)
+            .map(|i| CursorSample { t_ms: (from_s * 1000.0) as u64 + i * step, x, y })
+            .collect()
+    }
+
+    /// A cursor sweeping across the frame — movement, never settling.
+    fn sweep(from_s: f64, secs: f64, x0: i32, x1: i32) -> Vec<CursorSample> {
+        let step = 1000 / CURSOR_HZ;
+        let n = ((secs * 1000.0) as u64 / step).max(1);
+        (0..n)
+            .map(|i| CursorSample {
+                t_ms: (from_s * 1000.0) as u64 + i * step,
+                x: x0 + ((x1 - x0) * i as i32) / n as i32,
+                y: 400,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_cursor_that_settles_becomes_one_zoom_on_that_spot() {
+        let p = zoom_passes(&dwell(0.0, 6.0, 300, 200), 1920.0, 1080.0, 6.0);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].dwells.len(), 1);
+        assert!((p[0].dwells[0].cx - 300.0).abs() < 1.0, "cx = {}", p[0].dwells[0].cx);
+    }
+
+    #[test]
+    fn a_cursor_that_never_settles_gets_no_zoom_at_all() {
+        let p = zoom_passes(&sweep(0.0, 10.0, 0, 1900), 1920.0, 1080.0, 10.0);
+        assert!(p.is_empty(), "expected nothing, got {p:?}");
+    }
+
+    /// The regression this whole rewrite exists for.
+    ///
+    /// Settle, move, settle is the ordinary rhythm of working at a screen. Treating each settle
+    /// as its own zoom pumped the camera all the way out and straight back in between them, for
+    /// the length of the recording.
+    #[test]
+    fn two_nearby_dwells_share_one_zoom_and_pan_between_them() {
+        let mut t = dwell(0.0, 4.0, 200, 200);
+        t.extend(sweep(4.0, 2.0, 200, 900));
+        t.extend(dwell(6.0, 4.0, 900, 300));
+        let p = zoom_passes(&t, 1920.0, 1080.0, 10.0);
+        assert_eq!(p.len(), 1, "one passage, not two zooms: {p:?}");
+        assert_eq!(p[0].dwells.len(), 2, "both dwells inside it: {p:?}");
+        assert!(p[0].dwells[0].cx < p[0].dwells[1].cx);
+    }
+
+    #[test]
+    fn dwells_far_apart_in_time_do_get_separate_zooms() {
+        // Out and back, so the cursor is genuinely moving for eight seconds yet ends up near
+        // where it began. Sweeping only a short distance over that long would be *slow*, not
+        // moving, and would correctly read as one very patient dwell.
+        let mut t = dwell(0.0, 4.0, 300, 300);
+        t.extend(sweep(4.0, 4.0, 300, 900));
+        t.extend(sweep(8.0, 4.0, 900, 300));
+        t.extend(dwell(12.0, 4.0, 400, 300));
+        let p = zoom_passes(&t, 1920.0, 1080.0, 16.0);
+        assert_eq!(p.len(), 2, "an 8s gap means the recording moved on: {p:?}");
+    }
+
+    #[test]
+    fn a_pan_across_most_of_the_screen_breaks_the_passage_instead() {
+        // Close in time, but far enough apart that panning at full zoom would race past.
+        let mut t = dwell(0.0, 4.0, 100, 500);
+        t.extend(sweep(4.0, 2.0, 100, 1800));
+        t.extend(dwell(6.0, 4.0, 1800, 500));
+        let p = zoom_passes(&t, 1920.0, 1080.0, 10.0);
+        assert_eq!(p.len(), 2, "too far to pan, so pull out instead: {p:?}");
+    }
+
+    #[test]
+    fn samples_that_land_outside_the_frame_disable_zooming_entirely() {
+        let p = zoom_passes(&dwell(0.0, 6.0, -4000, -4000), 1920.0, 1080.0, 6.0);
+        assert!(p.is_empty(), "a bad origin must degrade to no zoom, got {p:?}");
+    }
+
+    #[test]
+    fn a_recording_too_short_to_zoom_in_and_out_of_is_left_alone() {
+        let p = zoom_passes(&dwell(0.0, 3.0, 300, 300), 1920.0, 1080.0, 3.0);
+        assert!(p.is_empty(), "{p:?}");
+    }
+
+    #[test]
+    fn the_filter_holds_zoom_at_one_outside_every_passage() {
+        let p = [ZoomPass { dwells: vec![ZoomSeg { t0: 2.0, t1: 6.0, cx: 400.0, cy: 300.0 }] }];
+        let f = zoom_filter(&p, 1280, 720, 30);
+        assert!(f.starts_with("zoompan=z='1+between(it,2.000,6.000)"), "{f}");
+        assert!(f.contains(":s=1280x720:fps=30"), "{f}");
+        assert!(f.contains("max(0,min(iw-iw/zoom"), "{f}");
+        assert!(f.contains("max(0,min(ih-ih/zoom"), "{f}");
+    }
+
+    #[test]
+    fn one_passage_means_one_zoom_gate_however_many_dwells_it_holds() {
+        let p = [ZoomPass {
+            dwells: vec![
+                ZoomSeg { t0: 1.0, t1: 4.0, cx: 100.0, cy: 100.0 },
+                ZoomSeg { t0: 6.0, t1: 9.0, cx: 700.0, cy: 400.0 },
+            ],
+        }];
+        let f = zoom_filter(&p, 1280, 720, 30);
+        // The zoom expression gates once — the camera goes in and out a single time.
+        let z = f.split(":x=").next().unwrap();
+        assert_eq!(z.matches("between(it,").count(), 1, "one gate in z: {z}");
+        // And the centre travels: the second dwell contributes a step term.
+        assert!(f.contains("+700.0-100.0") || f.contains("*600.0"), "pan step missing: {f}");
+        assert!(!f.contains("if("), "nesting per passage is what the sum exists to avoid");
+    }
+
+    #[test]
+    fn passages_are_summed_not_nested() {
+        let p = [
+            ZoomPass { dwells: vec![ZoomSeg { t0: 1.0, t1: 5.0, cx: 100.0, cy: 100.0 }] },
+            ZoomPass { dwells: vec![ZoomSeg { t0: 12.0, t1: 16.0, cx: 900.0, cy: 500.0 }] },
+        ];
+        let f = zoom_filter(&p, 1280, 720, 30);
+        assert_eq!(f.matches("between(it,").count(), 6, "2 per expression, 3 expressions");
+    }
+}
+

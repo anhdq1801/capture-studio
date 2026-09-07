@@ -10,6 +10,7 @@ import {
   Pricing,
   PricingTier,
   RESOLUTIONS,
+  AFTER_CAPTURE,
   IMAGE_FORMATS,
   ImageFormat,
   AppSettings,
@@ -76,7 +77,13 @@ const sameLang = (a: string, b: string) =>
   a.split(/[-_]/)[0].toLowerCase() === b.split(/[-_]/)[0].toLowerCase();
 
 const ocrLangOn = (saved: string[], id: string) => saved.some((l) => sameLang(l, id));
-import { DONATE_BANK, DONATE_URL } from "../lib/links";
+import {
+  DONATE_URL,
+  DONATE_BANK,
+  CONTACT_EMAIL,
+  issueUrl,
+  contactMailto,
+} from "../lib/links";
 
 /**
  * Settings used to be one long scroll. Splitting it means the thing you came to change is on
@@ -502,6 +509,26 @@ export function Settings({
         </div>
 
         <div className="field">
+          <label>After taking a screenshot</label>
+          <div className="chips">
+            {AFTER_CAPTURE.map((a) => (
+              <button
+                key={a.id}
+                className={`chip ${(rec?.afterCapture ?? "editor") === a.id ? "active" : ""}`}
+                onClick={() => saveRec({ afterCapture: a.id })}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+          <div className="hint">
+            {AFTER_CAPTURE.find((a) => a.id === (rec?.afterCapture ?? "editor"))?.hint}. Either
+            way the capture lands in your library — the choice is only whether the editor opens
+            first.
+          </div>
+        </div>
+
+        <div className="field">
           <div className="switch-row">
             <span className="lbl">Launch at startup</span>
             <Toggle on={autostart} onChange={toggleAutostart} label="Launch at startup" />
@@ -641,6 +668,47 @@ export function Settings({
                       </div>
                     </>
                   )}
+                </div>
+              </div>
+
+              {/* Directly under the donate card, because the two are asked of the same person at
+                  the same moment and only one of them is free to give. Until this existed the
+                  route back here ran through a Facebook post the reporter had to still be able
+                  to find, so in practice nothing came back at all. */}
+              <div className="field">
+                <label>Something not working?</label>
+                <div className="box report-box">
+                  <div className="hint" style={{ marginTop: 0 }}>
+                    A capture that came out wrong, a window that vanished, text read back
+                    scrambled — tell me and it gets fixed. Both routes below open already
+                    carrying your version and OS, so there is nothing to look up.
+                  </div>
+                  <div className="report-actions">
+                    <button
+                      className="btn sm"
+                      onClick={() =>
+                        openUrl(issueUrl(version)).catch((e) => toast(String(e), "err"))
+                      }
+                    >
+                      Report on GitHub
+                    </button>
+                    <button
+                      className="btn sm ghost"
+                      onClick={() =>
+                        openUrl(contactMailto(version)).catch(() =>
+                          /* No mail client configured is the ordinary case on a fresh Windows
+                             install, and a silent nothing looks like a broken button. The
+                             address is copyable right below either way. */
+                          toast("No mail app set up — copy the address below instead", "info"),
+                        )
+                      }
+                    >
+                      Email me
+                    </button>
+                  </div>
+                  {/* Spelled out rather than hidden behind the button: a mailto that opens
+                      nothing still leaves the address readable and copyable. */}
+                  <Command text={CONTACT_EMAIL} toast={toast} />
                 </div>
               </div>
             </aside>
@@ -962,8 +1030,18 @@ export function Settings({
         </div>
         )}
 
+        {/* The card in the aside only exists on the General tab, and a bug is as likely to be
+            noticed while looking at the recording settings. This line is on every tab. */}
         <div className="hint" style={{ marginTop: 24 }}>
           Capture Studio {version ? `v${version}` : ""} · Tauri + Rust · cross-platform (macOS &amp; Windows)
+          {" · "}
+          <button
+            className="link-btn"
+            style={{ marginTop: 0 }}
+            onClick={() => openUrl(issueUrl(version)).catch((e) => toast(String(e), "err"))}
+          >
+            Report a bug
+          </button>
         </div>
       </div>
     </>
