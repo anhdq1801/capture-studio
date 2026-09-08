@@ -1,6 +1,6 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-const WIDTH = 200;
+const WIDTH = 288;
 const HEIGHT = 52;
 
 /** Open the small always-on-top recording control bar, positioned top-center. */

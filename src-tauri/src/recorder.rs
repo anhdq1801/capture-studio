@@ -1,5 +1,7 @@
 use crate::library::{file_size, LibraryState};
-use crate::models::{CaptureDevices, CodecOption, DeviceEntry, MediaItem, RecordOptions};
+use crate::models::{
+    CaptureDevices, CodecOption, DeviceEntry, MediaItem, RecordOptions, RecordingState,
+};
 use crate::settings::SettingsState;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9,10 +11,26 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::State;
 
 pub struct RecordingSession {
-    child: Child,
+    /// The ffmpeg writing the current segment, or None while paused.
+    child: Option<Child>,
     id: String,
     file_name: String,
-    started: chrono::DateTime<chrono::Local>,
+    /// Full ffmpeg argument list bar the output path, so resume can spawn an identically
+    /// encoded segment. See `concat_segments` for why identical matters.
+    args: Vec<String>,
+    /// Where the finished recording goes, and the base the segment names are derived from.
+    out_path: PathBuf,
+    /// Library directory, for the ffmpeg log and the concat list.
+    dir: PathBuf,
+    /// Segments closed so far. The one being written is not in here until it ends.
+    segments: Vec<PathBuf>,
+    /// Recorded time from segments already closed. Wall-clock across the whole recording
+    /// counts the pauses too, which is exactly what the duration must not include.
+    active_ms: u64,
+    /// When the current segment began. Meaningless while paused.
+    segment_started: std::time::Instant,
+    /// Read by the cursor sampler so paused time leaves no samples and advances no timestamps.
+    paused: Arc<AtomicBool>,
     width: u32,
     height: u32,
     /// Where the cursor was, sampled while recording. Empty unless cursor-follow was asked for.
@@ -409,6 +427,75 @@ fn probe_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
     let text = String::from_utf8_lossy(&out.stdout);
     let (w, h) = text.trim().split_once('x')?;
     Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+}
+
+/// Where segment `n` of a recording is written: `rec-….part0.mp4` beside the final file.
+///
+/// Segments are an implementation detail of pause, so they are named off the real output and
+/// cleaned up on stop. A recording that was never paused has exactly one, and is renamed into
+/// place rather than concatenated.
+fn segment_path(out: &Path, n: usize) -> PathBuf {
+    let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+    out.with_extension(format!("part{n}.{ext}"))
+}
+
+/// Start ffmpeg on one segment. stdin stays open so `q` can end it gracefully.
+fn spawn_segment(args: &[String], out: &Path, dir: &Path) -> Result<Child, String> {
+    let mut cmd = ffmpeg();
+    cmd.args(args).arg(out);
+    match std::fs::File::create(dir.join("last-record.log")).ok() {
+        Some(f) => cmd.stderr(Stdio::from(f)),
+        None => cmd.stderr(Stdio::null()),
+    };
+    cmd.stdin(Stdio::piped()).stdout(Stdio::null());
+    cmd.spawn().map_err(|e| format!("Failed to start ffmpeg: {e}"))
+}
+
+/// Ask ffmpeg to finish the current segment and wait for the file to be closed.
+///
+/// `q` rather than a kill: an MP4 whose moov atom was never written is not a shorter video,
+/// it is an unplayable one, and that is the whole recording gone rather than the last frame.
+fn end_segment(child: &mut Child) -> std::io::Result<()> {
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b"q\n");
+        let _ = stdin.flush();
+    }
+    child.wait().map(|_| ())
+}
+
+/// Join the segments a paused recording produced into `out`.
+///
+/// Stream copy, not a re-encode: every segment came from the same argument list, so the codec
+/// parameters already match and joining is a remux costing a fraction of a second rather than
+/// a second pass over the whole recording.
+fn concat_segments(parts: &[PathBuf], out: &Path, dir: &Path) -> Result<(), String> {
+    let list = dir.join("segments.txt");
+    let body = parts
+        .iter()
+        .map(|p| format!("file '{}'\n", p.to_string_lossy().replace('\'', r"'\''")))
+        .collect::<String>();
+    std::fs::write(&list, body).map_err(|e| e.to_string())?;
+
+    let ok = ffmpeg()
+        .args(["-y", "-hide_banner", "-loglevel", "error"])
+        .args(["-f", "concat", "-safe", "0"])
+        .arg("-i")
+        .arg(&list)
+        .args(["-c", "copy"])
+        .arg(out)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let _ = std::fs::remove_file(&list);
+
+    if ok && out.exists() && file_size(out) > 0 {
+        Ok(())
+    } else {
+        Err("Could not join the paused recording's segments".into())
+    }
 }
 
 /// File name a recording's poster frame gets, alongside the video in the library directory.
@@ -811,8 +898,14 @@ pub async fn start_recording(
     }
     let target_h: Option<u32> = resolution.parse::<u32>().ok();
 
-    let mut cmd = ffmpeg();
-    cmd.arg("-y").arg("-hide_banner").arg("-loglevel").arg("error");
+    // Built as a list rather than straight onto a Command, because pause/resume respawns
+    // ffmpeg once per segment and every segment must be encoded identically — `concat -c copy`
+    // refuses to join clips whose codec parameters differ.
+    let mut args: Vec<String> = Vec::new();
+    macro_rules! arg {
+        ($($x:expr),+ $(,)?) => { $( args.push($x.to_string()); )+ };
+    }
+    arg!("-y", "-hide_banner", "-loglevel", "error");
 
     #[cfg(target_os = "macos")]
     {
@@ -821,10 +914,10 @@ pub async fn start_recording(
             Some(a) if !a.is_empty() => format!("{screen}:{a}"),
             _ => format!("{screen}:none"),
         };
-        cmd.args(["-f", "avfoundation"])
-            .args(["-capture_cursor", if cursor { "1" } else { "0" }])
-            .args(["-framerate", &fps.to_string()])
-            .args(["-i", &input]);
+        arg!("-f", "avfoundation");
+        arg!("-capture_cursor", if cursor { "1" } else { "0" });
+        arg!("-framerate", fps);
+        arg!("-i", input);
         // avfoundation always hands over the whole display, so a region (or a picked
         // window's bounds) becomes a crop filter chained ahead of any downscale.
         let mut filters: Vec<String> = Vec::new();
@@ -835,89 +928,77 @@ pub async fn start_recording(
             filters.push(scale_filter(th));
         }
         if !filters.is_empty() {
-            cmd.args(["-vf", &filters.join(",")]);
+            arg!("-vf", filters.join(","));
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        cmd.args(["-f", "gdigrab"])
-            .args(["-framerate", &fps.to_string()])
-            .args(["-draw_mouse", if cursor { "1" } else { "0" }]);
+        arg!("-f", "gdigrab");
+        arg!("-framerate", fps);
+        arg!("-draw_mouse", if cursor { "1" } else { "0" });
         if let Some([x, y, w, h]) = region {
-            cmd.args(["-offset_x", &x.to_string()])
-                .args(["-offset_y", &y.to_string()])
-                .args(["-video_size", &format!("{w}x{h}")]);
+            arg!("-offset_x", x, "-offset_y", y);
+            arg!("-video_size", format!("{w}x{h}"));
         }
-        cmd.args(["-i", "desktop"]);
+        arg!("-i", "desktop");
         if let Some(a) = &opts.audio_device {
             if !a.is_empty() {
-                cmd.args(["-f", "dshow", "-i", &format!("audio={a}")]);
+                arg!("-f", "dshow", "-i", format!("audio={a}"));
             }
         }
         // gdigrab already cropped via -offset_x/-video_size, so only the downscale is left.
         if let Some(th) = target_h {
-            cmd.args(["-vf", &scale_filter(th)]);
+            arg!("-vf", scale_filter(th));
         }
     }
 
     // ---- Encoding ----
-    cmd.args(["-c:v", encoder]);
+    arg!("-c:v", encoder);
     let out_h = target_h.unwrap_or(if height > 0 { height } else { 1080 });
     match encoder {
         // Hardware encoders take a bitrate rather than a quality target.
         e if e.ends_with("_videotoolbox") || e.ends_with("_nvenc") => {
-            cmd.args(["-b:v", bitrate_for(out_h)]);
+            arg!("-b:v", bitrate_for(out_h));
         }
         "libx264" => {
-            cmd.args(["-preset", "veryfast", "-crf", "23"]);
+            arg!("-preset", "veryfast", "-crf", "23");
         }
         "libx265" => {
-            cmd.args(["-preset", "veryfast", "-crf", "28"]);
+            arg!("-preset", "veryfast", "-crf", "28");
         }
         "libsvtav1" => {
             // preset 8 is the fast end of SVT-AV1; anything slower can't keep up live.
-            cmd.args(["-preset", "8", "-crf", "35"]);
+            arg!("-preset", "8", "-crf", "35");
         }
         "libaom-av1" => {
-            cmd.args(["-cpu-used", "8", "-crf", "35", "-b:v", "0"]);
+            arg!("-cpu-used", "8", "-crf", "35", "-b:v", "0");
         }
         "libvpx-vp9" => {
-            cmd.args(["-deadline", "realtime", "-cpu-used", "5", "-row-mt", "1"])
-                .args(["-crf", "34", "-b:v", "0"]);
+            arg!("-deadline", "realtime", "-cpu-used", "5", "-row-mt", "1");
+            arg!("-crf", "34", "-b:v", "0");
         }
         _ => {}
     }
     // QuickTime only recognises HEVC in MP4 when it carries the hvc1 tag.
     if codec == "hevc" {
-        cmd.args(["-tag:v", "hvc1"]);
+        arg!("-tag:v", "hvc1");
     }
     if codec != "vp9" {
-        cmd.args(["-pix_fmt", "yuv420p"]);
+        arg!("-pix_fmt", "yuv420p");
     }
 
     let has_audio = opts.audio_device.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
     if has_audio {
         if codec == "vp9" {
-            cmd.args(["-c:a", "libopus", "-b:a", "128k"]);
+            arg!("-c:a", "libopus", "-b:a", "128k");
         } else {
-            cmd.args(["-c:a", "aac", "-b:a", "128k"]);
+            arg!("-c:a", "aac", "-b:a", "128k");
         }
     }
-    cmd.arg(&out_path);
 
-    let log_path = dir.join("last-record.log");
-    let log = std::fs::File::create(&log_path).ok();
-
-    cmd.stdin(Stdio::piped());
-    if let Some(f) = log {
-        cmd.stderr(Stdio::from(f));
-    } else {
-        cmd.stderr(Stdio::null());
-    }
-    cmd.stdout(Stdio::null());
-
-    let child = cmd.spawn().map_err(|e| format!("Failed to start ffmpeg: {e}"))?;
+    let first = segment_path(&out_path, 0);
+    let child = spawn_segment(&args, &first, &dir)?;
 
     // Cursor-follow needs to know where video pixel (0,0) is on the desktop. Without that the
     // samples cannot be placed in the frame, so the option is simply not honoured rather than
@@ -937,35 +1018,53 @@ pub async fn start_recording(
 
     let cursor: Arc<Mutex<Vec<CursorSample>>> = Arc::new(Mutex::new(Vec::new()));
     let sampling = Arc::new(AtomicBool::new(zoom.is_some()));
+    let paused = Arc::new(AtomicBool::new(false));
     if zoom.is_some() {
         // Polled on a thread of its own rather than hooked into the OS event stream: a global
         // mouse hook needs Accessibility permission on macOS, which is a second scary system
         // prompt for a cosmetic feature. Polling needs no permission at all and 20 Hz is far
         // more resolution than a zoom that moves once every few seconds can use.
         let (samples, run, handle) = (cursor.clone(), sampling.clone(), app.clone());
-        let began = std::time::Instant::now();
+        let held = paused.clone();
         std::thread::spawn(move || {
             let step = std::time::Duration::from_millis(1000 / CURSOR_HZ);
+            // Accumulated rather than read off one Instant: the samples are placed against the
+            // encoded timeline, which does not advance while paused. Timing them from the start
+            // of the recording would slide every sample after a pause later than the frame it
+            // belongs to, and the zoom would land on wherever the cursor had since moved.
+            let mut recorded = std::time::Duration::ZERO;
+            let mut last = std::time::Instant::now();
             while run.load(Ordering::Relaxed) {
-                if let Ok(pos) = handle.cursor_position() {
-                    if let Ok(mut v) = samples.lock() {
-                        v.push(CursorSample {
-                            t_ms: began.elapsed().as_millis() as u64,
-                            x: pos.x as i32,
-                            y: pos.y as i32,
-                        });
+                let now = std::time::Instant::now();
+                if !held.load(Ordering::Relaxed) {
+                    recorded += now - last;
+                    if let Ok(pos) = handle.cursor_position() {
+                        if let Ok(mut v) = samples.lock() {
+                            v.push(CursorSample {
+                                t_ms: recorded.as_millis() as u64,
+                                x: pos.x as i32,
+                                y: pos.y as i32,
+                            });
+                        }
                     }
                 }
+                last = now;
                 std::thread::sleep(step);
             }
         });
     }
 
     let session = RecordingSession {
-        child,
+        child: Some(child),
         id: format!("rec-{}", chrono::Local::now().format("%Y%m%d-%H%M%S%3f")),
         file_name,
-        started: chrono::Local::now(),
+        args,
+        out_path,
+        dir: dir.clone(),
+        segments: Vec::new(),
+        active_ms: 0,
+        segment_started: std::time::Instant::now(),
+        paused,
         width,
         height,
         cursor,
@@ -975,6 +1074,70 @@ pub async fn start_recording(
     };
     *rec_state.lock().map_err(|e| e.to_string())? = Some(session);
     Ok(())
+}
+
+/// Close the current segment and leave the recording open, taking no more frames until resumed.
+///
+/// The elapsed time and the cursor samples both stop advancing here, so a pause costs the
+/// finished video nothing at all — it is not a still frame held for the duration.
+#[tauri::command]
+pub async fn pause_recording(rec_state: State<'_, RecorderState>) -> Result<(), String> {
+    let mut guard = rec_state.lock().map_err(|e| e.to_string())?;
+    let session = guard.as_mut().ok_or_else(|| "No recording in progress".to_string())?;
+    let Some(mut child) = session.child.take() else {
+        return Err("That recording is already paused".into());
+    };
+
+    session.paused.store(true, Ordering::Relaxed);
+    session.active_ms += session.segment_started.elapsed().as_millis() as u64;
+    end_segment(&mut child).map_err(|e| e.to_string())?;
+
+    let n = session.segments.len();
+    let part = segment_path(&session.out_path, n);
+    // A segment ffmpeg never managed to write is dropped rather than carried into the concat
+    // list, where it would fail the whole join over a fragment worth a fraction of a second.
+    if part.exists() && file_size(&part) > 0 {
+        session.segments.push(part);
+    }
+    Ok(())
+}
+
+/// Start a fresh segment, encoded identically to the ones before it.
+#[tauri::command]
+pub async fn resume_recording(rec_state: State<'_, RecorderState>) -> Result<(), String> {
+    let mut guard = rec_state.lock().map_err(|e| e.to_string())?;
+    let session = guard.as_mut().ok_or_else(|| "No recording in progress".to_string())?;
+    if session.child.is_some() {
+        return Err("That recording is not paused".into());
+    }
+
+    let next = segment_path(&session.out_path, session.segments.len());
+    let child = spawn_segment(&session.args, &next, &session.dir)?;
+    session.child = Some(child);
+    session.segment_started = std::time::Instant::now();
+    session.paused.store(false, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Whether a recording is running, and whether it is currently paused.
+#[tauri::command]
+pub fn recording_state(rec_state: State<RecorderState>) -> RecordingState {
+    match rec_state.lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(s) => RecordingState {
+                recording: true,
+                paused: s.child.is_none(),
+                elapsed_ms: s.active_ms
+                    + if s.child.is_some() {
+                        s.segment_started.elapsed().as_millis() as u64
+                    } else {
+                        0
+                    },
+            },
+            None => RecordingState::default(),
+        },
+        Err(_) => RecordingState::default(),
+    }
 }
 
 #[tauri::command]
@@ -992,30 +1155,47 @@ pub async fn stop_recording(
     // hand happened to move while the user waited.
     session.sampling.store(false, Ordering::Relaxed);
 
-    // Ask ffmpeg to finish encoding gracefully.
-    if let Some(mut stdin) = session.child.stdin.take() {
-        let _ = stdin.write_all(b"q\n");
-        let _ = stdin.flush();
+    // Ask ffmpeg to finish encoding gracefully. Already done if the user stopped while paused.
+    let mut status_code = None;
+    if let Some(mut child) = session.child.take() {
+        session.active_ms += session.segment_started.elapsed().as_millis() as u64;
+        let _ = end_segment(&mut child);
+        status_code = child.try_wait().ok().flatten().and_then(|s| s.code());
+        let part = segment_path(&session.out_path, session.segments.len());
+        if part.exists() && file_size(&part) > 0 {
+            session.segments.push(part);
+        }
     }
-    let status = session.child.wait().map_err(|e| e.to_string())?;
 
-    let duration_ms = (chrono::Local::now() - session.started).num_milliseconds().max(0) as u64;
+    let duration_ms = session.active_ms;
 
-    let (path, exists) = {
-        let lib = lib_state.lock().map_err(|e| e.to_string())?;
-        let p = lib.path_of(&session.file_name);
-        let exists = p.exists() && file_size(&p) > 0;
-        (p, exists)
+    let path = session.out_path.clone();
+    // One segment is the overwhelmingly common case — nobody paused — and renaming it into
+    // place skips a remux of the whole recording for no benefit.
+    let joined = match session.segments.len() {
+        0 => Err(String::new()),
+        1 => std::fs::rename(&session.segments[0], &path).map_err(|e| e.to_string()),
+        _ => concat_segments(&session.segments, &path, &session.dir),
     };
+    if joined.is_ok() {
+        // Only the parts that survived into the finished file; a rename left nothing behind.
+        for part in &session.segments {
+            let _ = std::fs::remove_file(part);
+        }
+    }
+
+    let exists = path.exists() && file_size(&path) > 0;
 
     if !exists {
+        // Leave the segments on disk. They are the recording, and a join that failed is a far
+        // better thing to be able to recover from by hand than a deleted take.
         let log = {
             let lib = lib_state.lock().map_err(|e| e.to_string())?;
             std::fs::read_to_string(lib.dir.join("last-record.log")).unwrap_or_default()
         };
         return Err(format!(
-            "Recording failed (ffmpeg exit {:?}). {}",
-            status.code(),
+            "Recording failed (ffmpeg exit {status_code:?}). {}{}",
+            joined.err().unwrap_or_default(),
             log.lines().last().unwrap_or("")
         ));
     }

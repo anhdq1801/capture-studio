@@ -352,6 +352,15 @@ export const startRecording = (opts: RecordOptions) =>
   invoke<void>("start_recording", { opts });
 export const stopRecording = () => invoke<MediaItem>("stop_recording");
 export const isRecording = () => invoke<boolean>("is_recording");
+export const pauseRecording = () => invoke<void>("pause_recording");
+export const resumeRecording = () => invoke<void>("resume_recording");
+export interface RecordingState {
+  recording: boolean;
+  paused: boolean;
+  /** Recorded milliseconds, which excludes every pause. */
+  elapsedMs: number;
+}
+export const recordingState = () => invoke<RecordingState>("recording_state");
 export const listVideoCodecs = () => invoke<CodecOption[]>("list_video_codecs");
 /** Absolute path of a recording's poster frame, generated on first ask. */
 export const ensureThumbnail = (id: string) =>

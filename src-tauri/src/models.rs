@@ -83,6 +83,19 @@ pub struct OptimizeResult {
     pub item: MediaItem,
 }
 
+/// What the recorder is doing, for any window that needs to show it.
+///
+/// The stop bar is a window of its own with no access to the app's React state, and after a
+/// pause the wall clock no longer matches the recording, so it asks rather than counting.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingState {
+    pub recording: bool,
+    pub paused: bool,
+    /// Recorded milliseconds, which excludes every pause.
+    pub elapsed_ms: u64,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureDevices {
