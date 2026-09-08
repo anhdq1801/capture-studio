@@ -49,9 +49,24 @@ const FFMPEG_EXE: &str = "ffmpeg.exe";
 #[cfg(not(windows))]
 const FFMPEG_EXE: &str = "ffmpeg";
 
+/// A `Command` that does not flash a console window on Windows.
+///
+/// Every spawn here is a background helper the user never asked to see. Without this each one
+/// pops a console over whatever they were looking at — and recording alone spawns three, so a
+/// single capture blinks a black window up three times.
+fn quiet(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 /// Does this path run and report a version?
 fn ffmpeg_works(path: &Path) -> bool {
-    Command::new(path)
+    quiet(path)
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -143,10 +158,10 @@ fn ffmpeg_path() -> Option<&'static PathBuf> {
 
 fn ffmpeg() -> Command {
     match ffmpeg_path() {
-        Some(path) => Command::new(path),
+        Some(path) => quiet(path),
         // Unreachable in practice — callers check availability first — but a command that
         // fails to spawn is a better fallback than a panic.
-        None => Command::new(FFMPEG_EXE),
+        None => quiet(FFMPEG_EXE),
     }
 }
 
@@ -377,7 +392,7 @@ fn bitrate_for(height: u32) -> &'static str {
 /// Read the real dimensions ffmpeg produced, rather than guessing from the crop rectangle —
 /// with a resolution preset the output is deliberately not the same size as the source.
 fn probe_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
-    let out = Command::new("ffprobe")
+    let out = quiet("ffprobe")
         .args([
             "-v",
             "error",
