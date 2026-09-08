@@ -21,6 +21,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [profile.dev]
 debug = "line-tables-only"
 
+# Dependencies get full optimisation even in dev builds. Unoptimised `image` is not a little
+# slower, it is unusable: encoding one 2880x1800 PNG costs 2.0 s against 11 ms release, and a
+# Lanczos3 resize 2.3 s against 49 ms — so under `tauri dev` every capture appeared to hang for
+# 3-4 s and the app read as broken rather than merely un-optimised. Only the 697 dependencies
+# are affected, not this crate, so incremental rebuilds of our own code stay fast, and the
+# dependency artefacts are compiled once and then cached.
+[profile.dev.package."*"]
+opt-level = 3
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
