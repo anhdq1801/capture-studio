@@ -771,10 +771,21 @@ pub fn start_recording(
 
     let fps = opts.fps.unwrap_or(30);
     let cursor = opts.capture_cursor.unwrap_or(true);
+    // yuv420p subsamples chroma 2x2, so libx264 and every other 4:2:0 encoder reject an odd
+    // width or height outright. `scale_filter` already rounds down, but it is only chained in
+    // when the resolution is a number — at "source" nothing else guards parity, and a drag-
+    // selected region is odd-sized about half the time. Trim the region instead of scaling it,
+    // which costs at most one row or column and keeps the capture pixel-exact.
+    let region = opts.region.map(|[x, y, w, h]| [x, y, w.max(0) & !1, h.max(0) & !1]);
+    if let Some([_, _, w, h]) = region {
+        if w < 2 || h < 2 {
+            return Err("That region is too small to record — drag out at least 2x2 pixels.".into());
+        }
+    }
     let (mut width, mut height) = (0u32, 0u32);
-    if let Some([_, _, w, h]) = opts.region {
-        width = w.max(0) as u32;
-        height = h.max(0) as u32;
+    if let Some([_, _, w, h]) = region {
+        width = w as u32;
+        height = h as u32;
     }
     let target_h: Option<u32> = resolution.parse::<u32>().ok();
 
@@ -795,7 +806,7 @@ pub fn start_recording(
         // avfoundation always hands over the whole display, so a region (or a picked
         // window's bounds) becomes a crop filter chained ahead of any downscale.
         let mut filters: Vec<String> = Vec::new();
-        if let Some([x, y, w, h]) = opts.region {
+        if let Some([x, y, w, h]) = region {
             filters.push(format!("crop={w}:{h}:{x}:{y}"));
         }
         if let Some(th) = target_h {
@@ -811,7 +822,7 @@ pub fn start_recording(
         cmd.args(["-f", "gdigrab"])
             .args(["-framerate", &fps.to_string()])
             .args(["-draw_mouse", if cursor { "1" } else { "0" }]);
-        if let Some([x, y, w, h]) = opts.region {
+        if let Some([x, y, w, h]) = region {
             cmd.args(["-offset_x", &x.to_string()])
                 .args(["-offset_y", &y.to_string()])
                 .args(["-video_size", &format!("{w}x{h}")]);
