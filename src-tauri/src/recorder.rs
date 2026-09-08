@@ -207,7 +207,7 @@ fn last_bracket_index(line: &str) -> Option<(String, String)> {
 }
 
 #[tauri::command]
-pub fn list_capture_devices() -> CaptureDevices {
+pub async fn list_capture_devices() -> CaptureDevices {
     let available = check_ffmpeg();
     if !available {
         return CaptureDevices {
@@ -261,12 +261,19 @@ pub fn list_capture_devices() -> CaptureDevices {
 }
 
 /// Encoder names this ffmpeg build reports, used to decide which codecs to offer.
-fn available_encoders() -> String {
-    ffmpeg()
-        .args(["-hide_banner", "-encoders"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default()
+///
+/// Cached for the same reason `ffmpeg_path` is: the answer cannot change while the app runs —
+/// it is a property of the binary on disk — and this is hit by the record dialog opening, by
+/// every recording start and by every trim, each time paying a process spawn.
+fn available_encoders() -> &'static str {
+    static ENCODERS: OnceLock<String> = OnceLock::new();
+    ENCODERS.get_or_init(|| {
+        ffmpeg()
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default()
+    })
 }
 
 /// Pick the concrete ffmpeg encoder for a codec id, preferring hardware where it exists.
@@ -322,7 +329,7 @@ fn container_for(codec: &str) -> &'static str {
 }
 
 #[tauri::command]
-pub fn list_video_codecs() -> Vec<CodecOption> {
+pub async fn list_video_codecs() -> Vec<CodecOption> {
     let encoders = available_encoders();
     let specs = [
         ("h264", "H.264 · MP4", "Plays everywhere. Largest files."),
@@ -446,7 +453,7 @@ const THUMB_HEIGHT: u32 = 480;
 /// by hand, so the gallery asks for one per item rather than assuming `thumbName` is valid.
 #[tauri::command]
 pub fn ensure_thumbnail(
-    lib_state: State<LibraryState>,
+    lib_state: State<'_, LibraryState>,
     id: String,
 ) -> Result<Option<String>, String> {
     // Everything ffmpeg needs is read out first: generating a poster takes long enough that
@@ -737,11 +744,11 @@ fn render_zoom(src: &Path, filter: &str, fps: u32) -> bool {
 }
 
 #[tauri::command]
-pub fn start_recording(
+pub async fn start_recording(
     app: tauri::AppHandle,
-    lib_state: State<LibraryState>,
-    rec_state: State<RecorderState>,
-    settings_state: State<SettingsState>,
+    lib_state: State<'_, LibraryState>,
+    rec_state: State<'_, RecorderState>,
+    settings_state: State<'_, SettingsState>,
     opts: RecordOptions,
 ) -> Result<(), String> {
     {
@@ -956,9 +963,9 @@ pub fn start_recording(
 }
 
 #[tauri::command]
-pub fn stop_recording(
-    lib_state: State<LibraryState>,
-    rec_state: State<RecorderState>,
+pub async fn stop_recording(
+    lib_state: State<'_, LibraryState>,
+    rec_state: State<'_, RecorderState>,
 ) -> Result<MediaItem, String> {
     let mut session = {
         let mut guard = rec_state.lock().map_err(|e| e.to_string())?;
@@ -1076,8 +1083,8 @@ pub fn stop_recording(
 /// the caller decides rather than this function assuming.
 #[tauri::command]
 pub fn trim_video(
-    lib_state: State<LibraryState>,
-    settings_state: State<SettingsState>,
+    lib_state: State<'_, LibraryState>,
+    settings_state: State<'_, SettingsState>,
     id: String,
     start_ms: u64,
     end_ms: u64,
